@@ -15,7 +15,7 @@ type dbConfig struct {
 func parseDSN(dsn string) (*dbConfig, error) {
 	if strings.HasSuffix(dsn, ".db") || strings.HasPrefix(dsn, "file:") || strings.HasPrefix(dsn, ":memory:") {
 		return &dbConfig{
-			Driver:  "sqlite3",
+			Driver:  "sqlite",
 			DSN:     dsn,
 			Dialect: SQLiteDialect{},
 		}, nil
@@ -34,6 +34,6 @@ func parseDSN(dsn string) (*dbConfig, error) {
 			Dialect: PostgreSQLDialect{},
 		}, nil
 	default:
-		return nil, fmt.Errorf("unsupported database type: %s (only sqlite3 and postgres are supported)", u.Scheme)
+		return nil, fmt.Errorf("unsupported database type: %s (only sqlite and postgres are supported)", u.Scheme)
 	}
 }

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"regexp"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/glebarez/go-sqlite"
 )
 
 // SQLiteDialect はSQLite用の実装
