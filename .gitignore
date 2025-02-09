@@ -1,2 +1,4 @@
 /cachembed
 /cachembed.db*
+# Added by goreleaser init:
+dist/
