@@ -41,8 +41,3 @@ jobs:
       run: go test -v ./...
       env:
         TEST_POSTGRES_DSN: "postgres://postgres:postgres@postgres:5432/cachembed_test?sslmode=disable"
-
-    - name: Run SQLite tests
-      run: go test -v ./...
-      env:
-        DATABASE_DSN: "cache.db" 
