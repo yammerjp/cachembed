@@ -45,6 +45,29 @@ changelog:
       - "^docs:"
       - "^test:"
 
+
+dockers:
+  - image_templates:
+      - ghcr.io/yammerjp/cachembed:latest-amd64
+      - ghcr.io/yammerjp/cachembed:{{ .Version }}-amd64
+      - ghcr.io/yammerjp/cachembed:{{ .Major }}-amd64
+      - ghcr.io/yammerjp/cachembed:{{ .Major }}.{{ .Minor }}-amd64
+    use: buildx
+    goos: linux
+    goarch: amd64
+    build_flag_templates:
+      - --platform=linux/amd64
+  - image_templates:
+      - ghcr.io/yammerjp/cachembed:latest-arm64
+      - ghcr.io/yammerjp/cachembed:{{ .Version }}-arm64
+      - ghcr.io/yammerjp/cachembed:{{ .Major }}-arm64
+      - ghcr.io/yammerjp/cachembed:{{ .Major }}.{{ .Minor }}-arm64
+    use: buildx
+    goos: linux
+    goarch: arm64
+    build_flag_templates:
+      - --platform=linux/arm64
+
 release:
   footer: >-
 
