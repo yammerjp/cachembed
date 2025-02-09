@@ -2,28 +2,47 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"database/sql"
 	"encoding/binary"
 	"fmt"
 	"log/slog"
+	"net/url"
+	"strings"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/lib/pq"           // PostgreSQLドライバー
+	_ "github.com/mattn/go-sqlite3" // SQLite3ドライバー
 )
 
-const schema = `
-CREATE TABLE IF NOT EXISTS embeddings (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    input_hash TEXT NOT NULL,
-    model TEXT NOT NULL,
-    embedding_data BLOB NOT NULL,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    last_accessed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(input_hash, model)
-);
-CREATE INDEX IF NOT EXISTS idx_input_model ON embeddings(input_hash, model);
-`
+// Dialect はデータベース固有のSQL文を提供するインターフェース
+type Dialect interface {
+	// GetPrimaryKeyType はデータベース固有のプライマリキー型を返します
+	GetPrimaryKeyType() string
+	// GetBlobType はデータベース固有のBLOB型を返します
+	GetBlobType() string
+}
+
+// SQLiteDialect はSQLite用の実装
+type SQLiteDialect struct{}
+
+func (d SQLiteDialect) GetPrimaryKeyType() string {
+	return "INTEGER PRIMARY KEY AUTOINCREMENT"
+}
+
+func (d SQLiteDialect) GetBlobType() string {
+	return "BLOB"
+}
+
+// PostgreSQLDialect はPostgreSQL用の実装
+type PostgreSQLDialect struct{}
+
+func (d PostgreSQLDialect) GetPrimaryKeyType() string {
+	return "BIGSERIAL PRIMARY KEY"
+}
+
+func (d PostgreSQLDialect) GetBlobType() string {
+	return "BYTEA"
+}
 
 // Sleeper はスリープ機能を抽象化するインターフェース
 type Sleeper interface {
@@ -45,50 +64,172 @@ type EmbeddingCache struct {
 }
 
 // runMigrations はデータベースのマイグレーションを実行します
-func runMigrations(db *sql.DB) error {
-	// スキーマを直接実行
-	if _, err := db.Exec(schema); err != nil {
+func runMigrations(db *sql.DB, dialect Dialect) error {
+	// テーブルの作成
+	createTableSQL := fmt.Sprintf(sqlCreateTable,
+		dialect.GetPrimaryKeyType(),
+		dialect.GetBlobType())
+
+	if _, err := db.Exec(createTableSQL); err != nil {
 		return fmt.Errorf("failed to create schema: %w", err)
 	}
+
+	// インデックスの作成
+	createIndexSQL := `
+	CREATE INDEX IF NOT EXISTS idx_input_model 
+	ON embeddings(input_hash, model)
+	`
+	if _, err := db.Exec(createIndexSQL); err != nil {
+		return fmt.Errorf("failed to create index: %w", err)
+	}
+
 	return nil
 }
 
-// DB構造体にSleeperを追加
+// DBConfig はデータベース設定を保持します
+type DBConfig struct {
+	Driver  string
+	DSN     string
+	Dialect Dialect
+}
+
+// ParseDSN はDSN文字列からデータベース設定を解析します
+func ParseDSN(dsn string) (*DBConfig, error) {
+	// SQLiteの場合
+	if strings.HasSuffix(dsn, ".db") || strings.HasPrefix(dsn, "file:") || strings.HasPrefix(dsn, ":memory:") {
+		return &DBConfig{
+			Driver:  "sqlite3",
+			DSN:     dsn,
+			Dialect: SQLiteDialect{},
+		}, nil
+	}
+
+	// URLベースのDSNをパース
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("invalid DSN format: %w", err)
+	}
+
+	switch u.Scheme {
+	case "postgres", "postgresql":
+		return &DBConfig{
+			Driver:  "postgres",
+			DSN:     dsn,
+			Dialect: PostgreSQLDialect{},
+		}, nil
+	default:
+		return nil, fmt.Errorf("unsupported database type: %s (only sqlite3 and postgres are supported)", u.Scheme)
+	}
+}
+
+// DB構造体を修正
 type DB struct {
 	*sql.DB
 	sleeper Sleeper
+	dialect Dialect
+	driver  string // プレースホルダー変換用
 }
 
 // NewDB関数を修正
 func NewDB(dsn string) (*DB, error) {
-	db, err := sql.Open("sqlite3", dsn)
+	config, err := ParseDSN(dsn)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
+		return nil, fmt.Errorf("failed to parse DSN: %w", err)
 	}
 
-	if err := db.Ping(); err != nil {
+	db, err := sql.Open(config.Driver, config.DSN)
+	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
-	// Enable WAL mode for better concurrency
-	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		return nil, fmt.Errorf("failed to enable WAL mode: %w", err)
+	// 接続テスト
+	if err := db.Ping(); err != nil {
+		db.Close() // エラー時にはDBをクローズ
+		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	// Run migrations
-	if err := runMigrations(db); err != nil {
+	// SQLite固有の設定
+	if config.Driver == "sqlite3" {
+		if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("failed to enable WAL mode: %w", err)
+		}
+	}
+
+	// マイグレーションを実行
+	if err := runMigrations(db, config.Dialect); err != nil {
+		db.Close()
 		return nil, fmt.Errorf("failed to run migrations: %w", err)
 	}
 
-	slog.Info("database initialized", "dsn", dsn)
-	return &DB{DB: db, sleeper: RealSleeper{}}, nil
+	return &DB{
+		DB:      db,
+		sleeper: RealSleeper{},
+		dialect: config.Dialect,
+		driver:  config.Driver,
+	}, nil
 }
 
 func (db *DB) Close() error {
 	return db.DB.Close()
 }
 
-// GetEmbedding は指定されたinput_hashとmodelの埋め込みを取得します
+// プレースホルダー変換関数を修正
+func (db *DB) convertPlaceholders(query string) string {
+	if db.driver == "postgres" {
+		// PostgreSQLでは$1, $2, ...の形式を使用
+		parts := strings.Split(query, "?")
+		if len(parts) == 1 {
+			return query
+		}
+		var sb strings.Builder
+		for i := 0; i < len(parts)-1; i++ {
+			sb.WriteString(parts[i])
+			sb.WriteString(fmt.Sprintf("$%d", i+1))
+		}
+		sb.WriteString(parts[len(parts)-1])
+		return sb.String()
+	}
+	// SQLiteでは?を使用
+	return query
+}
+
+// batchSizeを定数として定義
+const (
+	batchSize = 1000 // 一度に削除する最大レコード数
+
+	// テーブル作成用のSQL
+	sqlCreateTable = `
+	CREATE TABLE IF NOT EXISTS embeddings (
+		id %s,
+		input_hash TEXT NOT NULL,
+		model TEXT NOT NULL,
+		embedding_data %s NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		last_accessed_at TIMESTAMP NOT NULL,
+		UNIQUE(input_hash, model)
+	)`
+
+	// 共通のクエリ
+	sqlGetEmbedding = `
+	SELECT embedding_data, created_at, last_accessed_at
+	FROM embeddings 
+	WHERE input_hash = ? AND model = ?`
+
+	sqlUpdateLastAccessed = `
+	UPDATE embeddings
+	SET last_accessed_at = ?
+	WHERE input_hash = ? AND model = ?`
+
+	sqlStoreEmbedding = `
+	INSERT INTO embeddings (input_hash, model, embedding_data, created_at, last_accessed_at) 
+	VALUES (?, ?, ?, ?, ?)
+	ON CONFLICT(input_hash, model) DO UPDATE 
+	SET embedding_data = excluded.embedding_data,
+		last_accessed_at = excluded.last_accessed_at`
+)
+
+// GetEmbedding を修正
 func (db *DB) GetEmbedding(inputHash, model string) (*EmbeddingCache, error) {
 	var cache EmbeddingCache
 	var blobData []byte
@@ -99,11 +240,8 @@ func (db *DB) GetEmbedding(inputHash, model string) (*EmbeddingCache, error) {
 	}
 	defer tx.Rollback()
 
-	err = tx.QueryRow(`
-		SELECT embedding_data, created_at, last_accessed_at
-		FROM embeddings 
-		WHERE input_hash = ? AND model = ?
-	`, inputHash, model).Scan(&blobData, &cache.CreatedAt, &cache.LastAccessed)
+	query := db.convertPlaceholders(sqlGetEmbedding)
+	err = tx.QueryRow(query, inputHash, model).Scan(&blobData, &cache.CreatedAt, &cache.LastAccessed)
 
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -113,11 +251,13 @@ func (db *DB) GetEmbedding(inputHash, model string) (*EmbeddingCache, error) {
 	}
 
 	// アクセス時刻を更新
-	_, err = tx.Exec(`
+	now := time.Now().UTC()
+	updateQuery := db.convertPlaceholders(`
 		UPDATE embeddings
-		SET last_accessed_at = CURRENT_TIMESTAMP
+		SET last_accessed_at = ?
 		WHERE input_hash = ? AND model = ?
-	`, inputHash, model)
+	`)
+	_, err = tx.Exec(updateQuery, now, inputHash, model)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update last_accessed_at: %w", err)
 	}
@@ -135,7 +275,7 @@ func (db *DB) GetEmbedding(inputHash, model string) (*EmbeddingCache, error) {
 	return &cache, nil
 }
 
-// StoreEmbedding は埋め込みデータをキャッシュに保存します
+// StoreEmbedding を修正
 func (db *DB) StoreEmbedding(inputHash, model string, embedding []float32) error {
 	// float32スライスをBLOBに変換
 	buf := new(bytes.Buffer)
@@ -143,14 +283,19 @@ func (db *DB) StoreEmbedding(inputHash, model string, embedding []float32) error
 		return fmt.Errorf("failed to encode embedding data: %w", err)
 	}
 
+	// 現在時刻をUTCで取得
+	now := time.Now().UTC()
+
 	// embeddingsテーブルに挿入または更新
-	_, err := db.Exec(`
-		INSERT INTO embeddings (input_hash, model, embedding_data, last_accessed_at) 
-		VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+	query := db.convertPlaceholders(`
+		INSERT INTO embeddings (input_hash, model, embedding_data, created_at, last_accessed_at) 
+		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(input_hash, model) DO UPDATE 
 		SET embedding_data = excluded.embedding_data,
-		    last_accessed_at = CURRENT_TIMESTAMP
-	`, inputHash, model, buf.Bytes())
+			last_accessed_at = excluded.last_accessed_at
+	`)
+	// バイナリデータはそのまま[]byteとして渡す
+	_, err := db.Exec(query, inputHash, model, buf.Bytes(), now, now)
 	if err != nil {
 		return fmt.Errorf("failed to store embedding: %w", err)
 	}
@@ -158,29 +303,27 @@ func (db *DB) StoreEmbedding(inputHash, model string, embedding []float32) error
 	return nil
 }
 
-// DeleteEntriesBefore は指定された期間より前にアクセスされたエントリを削除します
-// startID から endID までの範囲で指定された期間より前のエントリを削除します
-func (db *DB) DeleteEntriesBefore(age time.Duration, startID, endID int64) error {
-	const batchSize = 1000
+func (db *DB) DeleteEntriesBeforeWithSleep(threshold time.Duration, startID, endID int64, sleep time.Duration) error {
+	// 現在時刻から threshold を引いた時刻を計算（UTCで）
+	thresholdTime := time.Now().UTC().Add(-threshold)
+
+	// SQLを統一
+	query := db.convertPlaceholders(`
+		DELETE FROM embeddings
+		WHERE id >= ? AND id < ?
+		AND last_accessed_at < ?
+	`)
+
 	var totalDeleted int64
 	currentID := startID
 
-	ageSeconds := fmt.Sprintf("-%d seconds", int(age.Seconds()))
-
 	for currentID < endID {
-		// バッチの範囲を決定
-		batchEndID := currentID + batchSize
-		if batchEndID > endID {
-			batchEndID = endID
+		batchEndID := currentID + batchSize - 1
+		if batchEndID >= endID {
+			batchEndID = endID - 1
 		}
 
-		// 指定範囲のレコードを削除
-		query := `
-			DELETE FROM embeddings
-			WHERE id >= ? AND id < ?
-			AND last_accessed_at < datetime('now', ?)
-		`
-		result, err := db.Exec(query, currentID, batchEndID, ageSeconds)
+		result, err := db.Exec(query, currentID, batchEndID+1, thresholdTime)
 		if err != nil {
 			return fmt.Errorf("failed to delete batch: %w", err)
 		}
@@ -192,112 +335,18 @@ func (db *DB) DeleteEntriesBefore(age time.Duration, startID, endID int64) error
 
 		totalDeleted += rowsAffected
 
-		// 進捗をログに出力
 		slog.Info("batch deletion progress",
 			"current_id", currentID,
 			"batch_end_id", batchEndID,
 			"batch_deleted", rowsAffected,
 			"total_deleted", totalDeleted,
-		)
+			"threshold_time", thresholdTime)
 
-		currentID = batchEndID
-	}
-
-	slog.Info("garbage collection completed",
-		"deleted_entries", totalDeleted,
-		"age", age,
-		"start_id", startID,
-		"end_id", endID,
-	)
-
-	return nil
-}
-
-// DeleteEntriesBeforeWithSleep を修正
-func (db *DB) DeleteEntriesBeforeWithSleep(age time.Duration, startID, endID int64, sleep time.Duration) error {
-	const batchSize = 1000
-	var totalDeleted int64
-	currentID := startID
-
-	ageSeconds := fmt.Sprintf("-%d seconds", int(age.Seconds()))
-
-	for currentID < endID {
-		// バッチの範囲を決定
-		batchEndID := currentID + batchSize
-		if batchEndID > endID {
-			batchEndID = endID
-		}
-
-		// 指定範囲のレコードを削除
-		query := `
-			DELETE FROM embeddings
-			WHERE id >= ? AND id < ?
-			AND last_accessed_at < datetime('now', ?)
-		`
-		result, err := db.Exec(query, currentID, batchEndID, ageSeconds)
-		if err != nil {
-			return fmt.Errorf("failed to delete batch: %w", err)
-		}
-
-		rowsAffected, err := result.RowsAffected()
-		if err != nil {
-			return fmt.Errorf("failed to get affected rows: %w", err)
-		}
-
-		totalDeleted += rowsAffected
-
-		// 進捗をログに出力
-		slog.Info("batch deletion progress",
-			"current_id", currentID,
-			"batch_end_id", batchEndID,
-			"batch_deleted", rowsAffected,
-			"total_deleted", totalDeleted,
-		)
-
-		// スリープ処理を修正
 		if sleep > 0 {
 			db.sleeper.Sleep(sleep)
 		}
 
-		currentID = batchEndID
-	}
-
-	slog.Info("garbage collection completed",
-		"deleted_entries", totalDeleted,
-		"age", age,
-		"start_id", startID,
-		"end_id", endID,
-	)
-
-	return nil
-}
-
-// GetMaxID は現在のデータベース内の最大IDを返します
-func (d *DB) GetMaxID(ctx context.Context) (int64, error) {
-	var maxID int64
-	query := "SELECT MAX(id) FROM items"
-	err := d.DB.QueryRowContext(ctx, query).Scan(&maxID)
-	if err != nil {
-		return 0, fmt.Errorf("failed to get max id: %w", err)
-	}
-	return maxID, nil
-}
-
-// DeleteByID は指定されたIDのエントリを削除します
-func (db *DB) DeleteByID(ctx context.Context, id int64) error {
-	query := `DELETE FROM embeddings WHERE id = ?`
-	result, err := db.ExecContext(ctx, query, id)
-	if err != nil {
-		return fmt.Errorf("failed to delete entry with id %d: %w", id, err)
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to get affected rows: %w", err)
-	}
-
-	if rowsAffected > 0 {
-		slog.Debug("deleted entry", "id", id)
+		currentID = batchEndID + 1
 	}
 
 	return nil

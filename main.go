@@ -19,7 +19,7 @@ type CLI struct {
 	GC       GCCmd      `cmd:"" help:"Manually trigger garbage collection for LRU cache."`
 	Migrate  MigrateCmd `cmd:"" help:"Run database migrations."`
 	LogLevel string     `help:"Logging level (debug, info, warn, error)." default:"info"`
-	DSN      string     `help:"Path to the SQLite database file." default:"cachembed.db"`
+	DSN      string     `help:"Database connection string. Use file path for SQLite (e.g., 'cache.db') or URL for PostgreSQL (e.g., 'postgres://user:pass@localhost/dbname')." default:"cachembed.db"`
 }
 
 type ServeCmd struct {
@@ -154,7 +154,13 @@ func runGarbageCollection(cmd GCCmd, dsn string) {
 func runMigration(dsn string) {
 	slog.Info("running database migration", "dsn", dsn)
 
-	db, err := sql.Open("sqlite3", dsn)
+	config, err := ParseDSN(dsn)
+	if err != nil {
+		slog.Error("failed to parse DSN", "error", err)
+		os.Exit(1)
+	}
+
+	db, err := sql.Open(config.Driver, config.DSN)
 	if err != nil {
 		slog.Error("failed to open database", "error", err)
 		os.Exit(1)
@@ -166,8 +172,8 @@ func runMigration(dsn string) {
 		os.Exit(1)
 	}
 
-	// マイグレーションの実行
-	if err := runMigrations(db); err != nil {
+	// マイグレーションの実行（Dialectを渡す）
+	if err := runMigrations(db, config.Dialect); err != nil {
 		slog.Error("failed to run migrations", "error", err)
 		os.Exit(1)
 	}
