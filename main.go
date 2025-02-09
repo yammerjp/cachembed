@@ -1,23 +1,28 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/alecthomas/kong"
 )
 
 type CLI struct {
-	Serve    ServeCmd `cmd:"" help:"Start the Cachembed server."`
-	GC       GCCmd    `cmd:"" help:"Manually trigger garbage collection for LRU cache."`
-	LogLevel string   `help:"Logging level (debug, info, warn, error)." default:"info"`
+	Serve    ServeCmd   `cmd:"" help:"Start the Cachembed server."`
+	GC       GCCmd      `cmd:"" help:"Manually trigger garbage collection for LRU cache."`
+	Migrate  MigrateCmd `cmd:"" help:"Run database migrations."`
+	LogLevel string     `help:"Logging level (debug, info, warn, error)." default:"info"`
+	DSN      string     `help:"Path to the SQLite database file." default:"cachembed.db"`
 }
 
 type ServeCmd struct {
-	DSN           string   `help:"Path to the SQLite database file." default:"cachembed.db"`
 	Host          string   `help:"Host to bind the server." default:"127.0.0.1"`
 	Port          int      `help:"Port to run the server on." default:"8080"`
 	UpstreamURL   string   `help:"URL of the upstream embedding API." env:"CACHEMBED_UPSTREAM_URL" default:"https://api.openai.com/v1/embeddings"`
@@ -26,8 +31,11 @@ type ServeCmd struct {
 }
 
 type GCCmd struct {
-	GCLimit int `help:"Number of least recently used items to remove." default:"100"`
+	Before string `help:"Delete entries accessed before this time (e.g. '24h', '7d', '30d')." required:""`
+	Limit  int    `help:"Maximum number of entries to delete (0 means no limit)." default:"0"`
 }
+
+type MigrateCmd struct{}
 
 func setupLogger(levelStr string) {
 	var level slog.Level
@@ -61,41 +69,112 @@ func main() {
 
 	switch ctx.Command() {
 	case "serve":
-		startServer(cli.Serve)
+		runServer(cli.Serve, cli.DSN)
 	case "gc":
-		runGarbageCollection(cli.GC)
+		runGarbageCollection(cli.GC, cli.DSN)
+	case "migrate":
+		runMigration(cli.DSN)
 	default:
 		log.Fatalf("Unknown command: %s", ctx.Command())
 	}
 }
 
-func startServer(cmd ServeCmd) {
+func runServer(cmd ServeCmd, dsn string) {
 	slog.Info("starting server",
 		"host", cmd.Host,
 		"port", cmd.Port,
-		"database", cmd.DSN,
-		"upstream_api", cmd.UpstreamURL,
+		"upstream_url", cmd.UpstreamURL,
 		"allowed_models", cmd.AllowedModels,
 	)
 
-	db, err := NewDB(cmd.DSN)
+	// データベースの初期化
+	db, err := NewDB(dsn)
 	if err != nil {
 		slog.Error("failed to initialize database", "error", err)
 		os.Exit(1)
 	}
 	defer db.Close()
 
-	handler := newHandler(cmd.AllowedModels, cmd.APIKeyPattern, cmd.UpstreamURL)
+	// ハンドラの作成
+	handler := newHandler(cmd.AllowedModels, cmd.APIKeyPattern, cmd.UpstreamURL, db)
 
+	// サーバーの起動
 	addr := fmt.Sprintf("%s:%d", cmd.Host, cmd.Port)
-	if err := http.ListenAndServe(addr, handler); err != nil {
-		slog.Error("server failed to start", "error", err)
+	server := &http.Server{
+		Addr:    addr,
+		Handler: handler,
+	}
+
+	slog.Info("server is ready", "addr", addr)
+	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		slog.Error("server error", "error", err)
 		os.Exit(1)
 	}
 }
 
-func runGarbageCollection(cmd GCCmd) {
-	slog.Info("running garbage collection", "gc_limit", cmd.GCLimit)
-	// TODO: Implement GC logic
-	os.Exit(1)
+func runGarbageCollection(cmd GCCmd, dsn string) {
+	duration, err := parseDuration(cmd.Before)
+	if err != nil {
+		slog.Error("invalid duration format", "error", err, "value", cmd.Before)
+		os.Exit(1)
+	}
+
+	slog.Info("running garbage collection",
+		"before", cmd.Before,
+		"limit", cmd.Limit,
+	)
+
+	db, err := NewDB(dsn)
+	if err != nil {
+		slog.Error("failed to initialize database", "error", err)
+		os.Exit(1)
+	}
+	defer db.Close()
+
+	if err := db.DeleteEntriesBefore(duration, cmd.Limit); err != nil {
+		slog.Error("failed to run garbage collection", "error", err)
+		os.Exit(1)
+	}
+
+	slog.Info("garbage collection completed successfully")
+	os.Exit(0)
+}
+
+func runMigration(dsn string) {
+	slog.Info("running database migration", "dsn", dsn)
+
+	db, err := sql.Open("sqlite3", dsn)
+	if err != nil {
+		slog.Error("failed to open database", "error", err)
+		os.Exit(1)
+	}
+	defer db.Close()
+
+	if err := db.Ping(); err != nil {
+		slog.Error("failed to connect to database", "error", err)
+		os.Exit(1)
+	}
+
+	// マイグレーションの実行
+	if err := runMigrations(db); err != nil {
+		slog.Error("failed to run migrations", "error", err)
+		os.Exit(1)
+	}
+
+	slog.Info("database migration completed successfully")
+}
+
+// parseDuration は "24h", "7d", "30d" のような文字列をtime.Durationに変換します
+func parseDuration(s string) (time.Duration, error) {
+	// 日単位の指定をサポート
+	if strings.HasSuffix(s, "d") {
+		days, err := strconv.Atoi(strings.TrimSuffix(s, "d"))
+		if err != nil {
+			return 0, fmt.Errorf("invalid day format: %w", err)
+		}
+		return time.Duration(days) * 24 * time.Hour, nil
+	}
+
+	// 時間単位の指定
+	return time.ParseDuration(s)
 }

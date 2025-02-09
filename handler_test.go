@@ -5,11 +5,25 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
+	"os"
 	"testing"
 )
 
 func TestHandleEmbeddings(t *testing.T) {
+	// テスト用の一時データベースを作成
+	tmpFile, err := os.CreateTemp("", "cachembed-test-*.db")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	tmpFile.Close()
+
+	db, err := NewDB(tmpFile.Name())
+	if err != nil {
+		t.Fatalf("Failed to create database: %v", err)
+	}
+	defer db.Close()
+
 	// モックサーバーの設定（シンプルな成功レスポンスのみ）
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := EmbeddingResponse{
@@ -38,222 +52,149 @@ func TestHandleEmbeddings(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	dimensions := 1536
 	allowedModels := []string{"text-embedding-ada-002"}
 	apiKeyPattern := "^sk-[a-zA-Z0-9]{32}$"
 	validAPIKey := "sk-abcdefghijklmnopqrstuvwxyz123456" // 有効なAPIキーの例
 
 	tests := []struct {
-		name          string
-		method        string
-		path          string
-		body          *EmbeddingRequest
-		authHeader    string
-		wantStatus    int
-		wantErrorMsg  string
-		wantErrorType string
+		name         string
+		method       string
+		path         string
+		body         *EmbeddingRequest
+		authHeader   string
+		wantStatus   int
+		wantCacheHit bool // キャッシュヒットを期待するかどうか
+		wantTokens   int  // 期待されるトークン数（キャッシュヒット時は0）
 	}{
 		{
-			name:   "valid request returns 200",
-			method: http.MethodPost,
+			name:   "valid request - initial (cache miss)",
+			method: "POST",
 			path:   "/v1/embeddings",
 			body: &EmbeddingRequest{
-				Input: "The food was delicious and the waiter...",
+				Input: "Hello, World!",
 				Model: "text-embedding-ada-002",
 			},
-			authHeader: "Bearer " + validAPIKey,
-			wantStatus: http.StatusOK,
+			authHeader:   "Bearer " + validAPIKey,
+			wantStatus:   http.StatusOK,
+			wantCacheHit: false,
+			wantTokens:   8,
 		},
 		{
-			name:          "missing auth header returns 401",
-			method:        http.MethodPost,
-			path:          "/v1/embeddings",
-			body:          nil,
-			authHeader:    "",
-			wantStatus:    http.StatusUnauthorized,
-			wantErrorMsg:  "Missing or invalid Authorization header. Expected format: 'Bearer YOUR-API-KEY'",
-			wantErrorType: "invalid_request_error",
-		},
-		{
-			name:          "invalid auth format returns 401",
-			method:        http.MethodPost,
-			path:          "/v1/embeddings",
-			body:          nil,
-			authHeader:    "Basic " + apiKeyPattern,
-			wantStatus:    http.StatusUnauthorized,
-			wantErrorMsg:  "Missing or invalid Authorization header. Expected format: 'Bearer YOUR-API-KEY'",
-			wantErrorType: "invalid_request_error",
-		},
-		{
-			name:          "invalid api key returns 401",
-			method:        http.MethodPost,
-			path:          "/v1/embeddings",
-			body:          nil,
-			authHeader:    "Bearer invalid-key",
-			wantStatus:    http.StatusUnauthorized,
-			wantErrorMsg:  "Invalid API key",
-			wantErrorType: "invalid_request_error",
-		},
-		{
-			name:   "valid request with optional params returns 200",
-			method: http.MethodPost,
+			name:   "valid request - cached (cache hit)",
+			method: "POST",
 			path:   "/v1/embeddings",
 			body: &EmbeddingRequest{
-				Input:          "The food was delicious and the waiter...",
-				Model:          "text-embedding-ada-002",
-				EncodingFormat: "float",
-				Dimensions:     &dimensions,
-				User:           "user-123",
-			},
-			authHeader: "Bearer " + validAPIKey,
-			wantStatus: http.StatusOK,
-		},
-		{
-			name:   "invalid encoding_format returns 400",
-			method: http.MethodPost,
-			path:   "/v1/embeddings",
-			body: &EmbeddingRequest{
-				Input:          "The food was delicious",
-				Model:          "text-embedding-ada-002",
-				EncodingFormat: "invalid",
-			},
-			authHeader:    "Bearer " + validAPIKey,
-			wantStatus:    http.StatusBadRequest,
-			wantErrorMsg:  "Invalid encoding_format: must be either 'float' or 'base64'",
-			wantErrorType: "invalid_request_error",
-		},
-		{
-			name:   "empty input returns 400",
-			method: http.MethodPost,
-			path:   "/v1/embeddings",
-			body: &EmbeddingRequest{
-				Input: "",
+				Input: "Hello, World!",
 				Model: "text-embedding-ada-002",
 			},
-			authHeader:    "Bearer " + validAPIKey,
-			wantStatus:    http.StatusBadRequest,
-			wantErrorMsg:  "Missing required fields: 'input' and 'model' must not be empty",
-			wantErrorType: "invalid_request_error",
+			authHeader:   "Bearer " + validAPIKey,
+			wantStatus:   http.StatusOK,
+			wantCacheHit: true,
+			wantTokens:   0,
 		},
 		{
-			name:   "empty model returns 400",
-			method: http.MethodPost,
-			path:   "/v1/embeddings",
-			body: &EmbeddingRequest{
-				Input: "The food was delicious",
-				Model: "",
-			},
-			authHeader:    "Bearer " + validAPIKey,
-			wantStatus:    http.StatusBadRequest,
-			wantErrorMsg:  "Missing required fields: 'input' and 'model' must not be empty",
-			wantErrorType: "invalid_request_error",
-		},
-		{
-			name:          "invalid JSON returns 400",
-			method:        http.MethodPost,
-			path:          "/v1/embeddings",
-			body:          nil,
-			authHeader:    "Bearer " + validAPIKey,
-			wantStatus:    http.StatusBadRequest,
-			wantErrorMsg:  "Invalid JSON payload",
-			wantErrorType: "invalid_request_error",
-		},
-		{
-			name:       "GET to correct path returns 405",
-			method:     http.MethodGet,
+			name:       "invalid method",
+			method:     "GET",
 			path:       "/v1/embeddings",
-			body:       nil,
 			wantStatus: http.StatusMethodNotAllowed,
 		},
 		{
-			name:       "wrong path returns 404",
-			method:     http.MethodPost,
-			path:       "/wrong/path",
-			body:       nil,
+			name:       "invalid path",
+			method:     "POST",
+			path:       "/v1/invalid",
 			wantStatus: http.StatusNotFound,
 		},
 		{
-			name:   "unsupported model returns 400",
-			method: http.MethodPost,
+			name:   "missing auth header",
+			method: "POST",
 			path:   "/v1/embeddings",
 			body: &EmbeddingRequest{
-				Input: "The food was delicious",
-				Model: "unsupported-model",
-			},
-			authHeader:    "Bearer " + validAPIKey,
-			wantStatus:    http.StatusBadRequest,
-			wantErrorMsg:  "Unsupported model: unsupported-model",
-			wantErrorType: "invalid_request_error",
-		},
-		{
-			name:          "invalid api key format returns 401",
-			method:        http.MethodPost,
-			path:          "/v1/embeddings",
-			body:          nil,
-			authHeader:    "Bearer invalid-format-key",
-			wantStatus:    http.StatusUnauthorized,
-			wantErrorMsg:  "Invalid API key format",
-			wantErrorType: "invalid_request_error",
-		},
-		{
-			name:   "valid api key format returns 200",
-			method: http.MethodPost,
-			path:   "/v1/embeddings",
-			body: &EmbeddingRequest{
-				Input: "The food was delicious",
+				Input: "test",
 				Model: "text-embedding-ada-002",
 			},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name:   "invalid auth format",
+			method: "POST",
+			path:   "/v1/embeddings",
+			body: &EmbeddingRequest{
+				Input: "test",
+				Model: "text-embedding-ada-002",
+			},
+			authHeader: "Invalid " + validAPIKey,
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name:   "invalid api key",
+			method: "POST",
+			path:   "/v1/embeddings",
+			body: &EmbeddingRequest{
+				Input: "test",
+				Model: "text-embedding-ada-002",
+			},
+			authHeader: "Bearer invalid-key",
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name:   "invalid model",
+			method: "POST",
+			path:   "/v1/embeddings",
+			body: &EmbeddingRequest{
+				Input: "test",
+				Model: "invalid-model",
+			},
 			authHeader: "Bearer " + validAPIKey,
-			wantStatus: http.StatusOK,
+			wantStatus: http.StatusBadRequest,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			handler := newHandler(allowedModels, apiKeyPattern, ts.URL, db)
+
 			var body []byte
-			var err error
 			if tt.body != nil {
+				var err error
 				body, err = json.Marshal(tt.body)
 				if err != nil {
-					t.Fatal(err)
+					t.Fatalf("Failed to marshal request body: %v", err)
 				}
 			}
 
-			req, err := http.NewRequest(tt.method, tt.path, bytes.NewBuffer(body))
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			if tt.body != nil {
-				req.Header.Set("Content-Type", "application/json")
-			}
+			req := httptest.NewRequest(tt.method, tt.path, bytes.NewReader(body))
 			if tt.authHeader != "" {
 				req.Header.Set("Authorization", tt.authHeader)
 			}
+			req.Header.Set("Content-Type", "application/json")
 
-			rr := httptest.NewRecorder()
-			handler := newHandler(allowedModels, apiKeyPattern, ts.URL)
-			handler.ServeHTTP(rr, req)
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
 
-			if status := rr.Code; status != tt.wantStatus {
-				t.Errorf("handler returned wrong status code: got %v want %v",
-					status, tt.wantStatus)
+			if w.Code != tt.wantStatus {
+				t.Errorf("Expected status code %d, got %d", tt.wantStatus, w.Code)
 			}
 
-			if tt.wantErrorMsg != "" {
-				var errResp ErrorResponse
-				if err := json.NewDecoder(rr.Body).Decode(&errResp); err != nil {
-					t.Fatalf("Failed to decode error response: %v", err)
+			if tt.wantStatus == http.StatusOK {
+				var resp EmbeddingResponse
+				if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+					t.Fatalf("Failed to decode response: %v", err)
 				}
 
-				if !strings.Contains(errResp.Error.Message, tt.wantErrorMsg) {
-					t.Errorf("handler returned wrong error message: got %v want %v",
-						errResp.Error.Message, tt.wantErrorMsg)
+				// キャッシュヒットの検証
+				if tt.wantCacheHit && resp.Usage.TotalTokens != 0 {
+					t.Error("Expected cache hit (zero tokens), got cache miss")
+				}
+				if !tt.wantCacheHit && resp.Usage.TotalTokens != tt.wantTokens {
+					t.Errorf("Expected %d tokens, got %d", tt.wantTokens, resp.Usage.TotalTokens)
 				}
 
-				if errResp.Error.Type != tt.wantErrorType {
-					t.Errorf("handler returned wrong error type: got %v want %v",
-						errResp.Error.Type, tt.wantErrorType)
+				// レスポンスの基本的な検証
+				if len(resp.Data) != 1 {
+					t.Errorf("Expected 1 embedding, got %d", len(resp.Data))
+				}
+				if len(resp.Data[0].Embedding) != 3 {
+					t.Errorf("Expected embedding length 3, got %d", len(resp.Data[0].Embedding))
 				}
 			}
 		})

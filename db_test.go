@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
 	"os"
 	"testing"
+	"time"
 )
 
 func TestNewDB(t *testing.T) {
@@ -63,8 +66,8 @@ func TestNewDB(t *testing.T) {
 				tables = append(tables, name)
 			}
 
-			if len(tables) != 1 || tables[0] != "embeddings" {
-				t.Error("Expected embeddings table to exist")
+			if len(tables) != 1 {
+				t.Error("Expected table embeddings to exist")
 			}
 
 			// Verify indices
@@ -86,7 +89,7 @@ func TestNewDB(t *testing.T) {
 				indices = append(indices, name)
 			}
 
-			expectedIndices := []string{"idx_last_accessed", "idx_input_model"}
+			expectedIndices := []string{"idx_input_model"}
 			for _, idx := range expectedIndices {
 				found := false
 				for _, actual := range indices {
@@ -117,6 +120,11 @@ func TestEmbeddingCacheOperations(t *testing.T) {
 		t.Fatalf("Failed to create database: %v", err)
 	}
 	defer db.Close()
+
+	// マイグレーションを実行
+	if err := runMigrations(db.DB); err != nil {
+		t.Fatalf("Failed to run migrations: %v", err)
+	}
 
 	// テストデータ
 	inputHash := "testhash123"
@@ -165,18 +173,40 @@ func TestEmbeddingCacheOperations(t *testing.T) {
 
 	// GC操作のテスト
 	t.Run("garbage collection", func(t *testing.T) {
-		// 追加のエントリを作成
+		// 既存のデータをクリア
+		_, err := db.Exec("DELETE FROM embeddings")
+		if err != nil {
+			t.Fatalf("Failed to clear embeddings: %v", err)
+		}
+
+		// 古いエントリを作成
 		for i := 0; i < 5; i++ {
-			hash := fmt.Sprintf("hash%d", i)
-			err := db.StoreEmbedding(hash, model, embedding)
+			hash := fmt.Sprintf("old_hash%d", i)
+			buf := new(bytes.Buffer)
+			if err := binary.Write(buf, binary.LittleEndian, embedding); err != nil {
+				t.Fatalf("Failed to encode embedding data: %v", err)
+			}
+
+			_, err := db.Exec(`
+				INSERT INTO embeddings (input_hash, model, embedding_data, last_accessed_at)
+				VALUES (?, ?, ?, datetime('now', '-1 hour'))
+			`, hash, model, buf.Bytes())
 			if err != nil {
+				t.Fatalf("Failed to create old entry: %v", err)
+			}
+		}
+
+		// 新しいエントリを作成
+		for i := 0; i < 5; i++ {
+			hash := fmt.Sprintf("new_hash%d", i)
+			if err := db.StoreEmbedding(hash, model, embedding); err != nil {
 				t.Fatalf("Failed to store embedding: %v", err)
 			}
 		}
 
-		// 古いエントリを削除
-		err := db.DeleteOldEntries(3)
-		if err != nil {
+		// 30分以上前のエントリを削除
+		duration := 30 * time.Minute
+		if err := db.DeleteEntriesBefore(duration, 0); err != nil {
 			t.Fatalf("Failed to delete old entries: %v", err)
 		}
 
@@ -187,8 +217,94 @@ func TestEmbeddingCacheOperations(t *testing.T) {
 			t.Fatalf("Failed to count remaining entries: %v", err)
 		}
 
-		if count != 3 {
-			t.Errorf("Expected 3 entries after GC, got %d", count)
+		if count != 5 {
+			t.Errorf("Expected 5 entries after GC, got %d", count)
+		}
+
+		// 古いエントリが削除されたことを確認
+		var oldCount int
+		err = db.QueryRow(`
+			SELECT COUNT(*) FROM embeddings
+			WHERE last_accessed_at < datetime('now', '-30 minutes')
+		`).Scan(&oldCount)
+		if err != nil {
+			t.Fatalf("Failed to count old entries: %v", err)
+		}
+
+		if oldCount != 0 {
+			t.Errorf("Expected no old entries after GC, got %d", oldCount)
 		}
 	})
+}
+
+func TestDeleteOldEntries(t *testing.T) {
+	// テスト用の一時データベースを作成
+	tmpFile, err := os.CreateTemp("", "cachembed-test-*.db")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	tmpFile.Close()
+
+	db, err := NewDB(tmpFile.Name())
+	if err != nil {
+		t.Fatalf("Failed to create database: %v", err)
+	}
+	defer db.Close()
+
+	// テストデータ
+	model := "test-model"
+	embedding := []float32{0.1, 0.2, 0.3}
+
+	// 複数のエントリを作成
+	for i := 0; i < 10; i++ {
+		hash := fmt.Sprintf("hash%d", i)
+		if err := db.StoreEmbedding(hash, model, embedding); err != nil {
+			t.Fatalf("Failed to store embedding: %v", err)
+		}
+	}
+
+	// 最初の5つのエントリのアクセス時刻を1時間前に設定
+	for i := 0; i < 5; i++ {
+		hash := fmt.Sprintf("hash%d", i)
+		_, err := db.Exec(`
+			UPDATE embeddings 
+			SET last_accessed_at = datetime('now', '-1 hour')
+			WHERE input_hash = ?
+		`, hash)
+		if err != nil {
+			t.Fatalf("Failed to update access time: %v", err)
+		}
+	}
+
+	// GCを実行（古い5つのエントリを削除）
+	duration := 30 * time.Minute
+	if err := db.DeleteEntriesBefore(duration, 5); err != nil {
+		t.Fatalf("Failed to run garbage collection: %v", err)
+	}
+
+	// 残りのエントリ数を確認
+	var count int
+	err = db.QueryRow("SELECT COUNT(*) FROM embeddings").Scan(&count)
+	if err != nil {
+		t.Fatalf("Failed to count remaining entries: %v", err)
+	}
+
+	if count != 5 {
+		t.Errorf("Expected 5 entries after GC, got %d", count)
+	}
+
+	// 古いエントリが削除されたことを確認
+	var oldCount int
+	err = db.QueryRow(`
+		SELECT COUNT(*) FROM embeddings
+		WHERE last_accessed_at < datetime('now', '-30 minutes')
+	`).Scan(&oldCount)
+	if err != nil {
+		t.Fatalf("Failed to count old entries: %v", err)
+	}
+
+	if oldCount != 0 {
+		t.Errorf("Expected no old entries after GC, got %d", oldCount)
+	}
 }

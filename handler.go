@@ -12,6 +12,9 @@ import (
 	"slices"
 	"strings"
 
+	"crypto/sha1"
+	"encoding/hex"
+
 	"github.com/google/uuid"
 )
 
@@ -50,9 +53,10 @@ type handler struct {
 	apiKeyPattern string
 	apiKeyRegexp  *regexp.Regexp
 	upstream      *upstreamClient
+	db            *DB
 }
 
-func newHandler(allowedModels []string, apiKeyPattern string, upstreamURL string) http.Handler {
+func newHandler(allowedModels []string, apiKeyPattern string, upstreamURL string, db *DB) http.Handler {
 	var re *regexp.Regexp
 	if apiKeyPattern != "" {
 		var err error
@@ -67,6 +71,7 @@ func newHandler(allowedModels []string, apiKeyPattern string, upstreamURL string
 		apiKeyPattern: apiKeyPattern,
 		apiKeyRegexp:  re,
 		upstream:      newUpstreamClient(upstreamURL),
+		db:            db,
 	}
 }
 
@@ -207,7 +212,56 @@ func (h *handler) handleRequest(w http.ResponseWriter, r *http.Request, result *
 		return result.err
 	}
 
-	// OpenAI APIにリクエストを送信
+	// 入力のハッシュを計算
+	inputHash := sha1.Sum([]byte(req.Input))
+	inputHashStr := hex.EncodeToString(inputHash[:])
+
+	// キャッシュをチェック
+	if cache, err := h.db.GetEmbedding(inputHashStr, req.Model); err != nil {
+		slog.Error("failed to query cache",
+			"error", err,
+			"input_hash", inputHashStr,
+			"model", req.Model,
+		)
+	} else if cache != nil {
+		// キャッシュヒット
+		slog.Debug("cache hit",
+			"input_hash", inputHashStr,
+			"model", req.Model,
+			"created_at", cache.CreatedAt,
+			"last_accessed", cache.LastAccessed,
+		)
+
+		resp := EmbeddingResponse{
+			Object: "list",
+			Data: []struct {
+				Object    string    `json:"object"`
+				Embedding []float32 `json:"embedding"`
+				Index     int       `json:"index"`
+			}{
+				{
+					Object:    "embedding",
+					Embedding: cache.EmbeddingData,
+					Index:     0,
+				},
+			},
+			Model: req.Model,
+			Usage: struct {
+				PromptTokens int `json:"prompt_tokens"`
+				TotalTokens  int `json:"total_tokens"`
+			}{
+				// キャッシュヒット時はトークン数を0として報告
+				PromptTokens: 0,
+				TotalTokens:  0,
+			},
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		return json.NewEncoder(w).Encode(resp)
+	}
+
+	// キャッシュミス：upstreamにリクエスト
 	resp, err := h.upstream.createEmbedding(&req, r.Header.Get("Authorization"))
 	if err != nil {
 		if ue, ok := err.(*upstreamError); ok {
@@ -222,6 +276,15 @@ func (h *handler) handleRequest(w http.ResponseWriter, r *http.Request, result *
 		result.err = fmt.Errorf("upstream error: %w", err)
 		writeError(w, result.status, "Failed to reach upstream API: "+err.Error(), "upstream_error")
 		return result.err
+	}
+
+	// 成功時はキャッシュに保存
+	if err := h.db.StoreEmbedding(inputHashStr, req.Model, resp.Data[0].Embedding); err != nil {
+		slog.Error("failed to store cache",
+			"error", err,
+			"input_hash", inputHashStr,
+			"model", req.Model,
+		)
 	}
 
 	// 成功時のメタデータを記録
