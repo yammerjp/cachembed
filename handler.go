@@ -2,8 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
+	"os"
+	"regexp"
 	"slices"
+	"strings"
 )
 
 type EmbeddingRequest struct {
@@ -24,11 +28,24 @@ type ErrorResponse struct {
 
 type handler struct {
 	allowedModels []string
+	apiKeyPattern string
+	apiKeyRegexp  *regexp.Regexp
 }
 
-func newHandler(allowedModels []string) http.Handler {
+func newHandler(allowedModels []string, apiKeyPattern string) http.Handler {
+	var re *regexp.Regexp
+	if apiKeyPattern != "" {
+		var err error
+		re, err = regexp.Compile(apiKeyPattern)
+		if err != nil {
+			log.Fatalf("Invalid API key pattern: %v", err)
+			os.Exit(1)
+		}
+	}
 	return &handler{
 		allowedModels: allowedModels,
+		apiKeyPattern: apiKeyPattern,
+		apiKeyRegexp:  re,
 	}
 }
 
@@ -51,6 +68,24 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "Method not allowed. Please use POST.", "invalid_request_error")
+		return
+	}
+
+	// Check Authorization header
+	authHeader := r.Header.Get("Authorization")
+	if !strings.HasPrefix(authHeader, "Bearer ") {
+		writeError(w, http.StatusUnauthorized, "Missing or invalid Authorization header. Expected format: 'Bearer YOUR-API-KEY'", "invalid_request_error")
+		return
+	}
+
+	token := strings.TrimPrefix(authHeader, "Bearer ")
+	if token == "" {
+		writeError(w, http.StatusUnauthorized, "API key is required", "invalid_request_error")
+		return
+	}
+
+	if h.apiKeyRegexp != nil && !h.apiKeyRegexp.MatchString(token) {
+		writeError(w, http.StatusUnauthorized, "Invalid API key format", "invalid_request_error")
 		return
 	}
 

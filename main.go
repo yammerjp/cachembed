@@ -22,6 +22,7 @@ type ServeCmd struct {
 	Port          int      `help:"Port to run the server on." default:"8080"`
 	UpstreamURL   string   `help:"URL of the upstream embedding API." env:"CACHEMBED_UPSTREAM_URL" default:"https://api.openai.com/v1/embeddings"`
 	AllowedModels []string `help:"List of allowed embedding models." env:"CACHEMBED_ALLOWED_MODELS" default:"text-embedding-3-small,text-embedding-3-large,text-embedding-ada-002"`
+	APIKeyPattern string   `help:"Regular expression pattern for API key validation." env:"CACHEMBED_API_KEY_PATTERN" default:"^sk-[a-zA-Z0-9]+$"`
 }
 
 type GCCmd struct {
@@ -73,7 +74,7 @@ func startServer(cmd ServeCmd) {
 	fmt.Printf("Upstream API: %s\n", cmd.UpstreamURL)
 	fmt.Printf("Allowed models: %v\n", cmd.AllowedModels)
 
-	handler := newHandler(cmd.AllowedModels)
+	handler := newHandler(cmd.AllowedModels, cmd.APIKeyPattern)
 
 	addr := fmt.Sprintf("%s:%d", cmd.Host, cmd.Port)
 	if err := http.ListenAndServe(addr, handler); err != nil {

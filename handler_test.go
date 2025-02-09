@@ -12,12 +12,15 @@ import (
 func TestHandleEmbeddings(t *testing.T) {
 	dimensions := 1536
 	allowedModels := []string{"text-embedding-ada-002"}
+	apiKeyPattern := "^sk-[a-zA-Z0-9]{32}$"
+	validAPIKey := "sk-abcdefghijklmnopqrstuvwxyz123456" // 有効なAPIキーの例
 
 	tests := []struct {
 		name          string
 		method        string
 		path          string
 		body          *EmbeddingRequest
+		authHeader    string
 		wantStatus    int
 		wantErrorMsg  string
 		wantErrorType string
@@ -30,7 +33,38 @@ func TestHandleEmbeddings(t *testing.T) {
 				Input: "The food was delicious and the waiter...",
 				Model: "text-embedding-ada-002",
 			},
+			authHeader: "Bearer " + validAPIKey,
 			wantStatus: http.StatusOK,
+		},
+		{
+			name:          "missing auth header returns 401",
+			method:        http.MethodPost,
+			path:          "/v1/embeddings",
+			body:          nil,
+			authHeader:    "",
+			wantStatus:    http.StatusUnauthorized,
+			wantErrorMsg:  "Missing or invalid Authorization header. Expected format: 'Bearer YOUR-API-KEY'",
+			wantErrorType: "invalid_request_error",
+		},
+		{
+			name:          "invalid auth format returns 401",
+			method:        http.MethodPost,
+			path:          "/v1/embeddings",
+			body:          nil,
+			authHeader:    "Basic " + apiKeyPattern,
+			wantStatus:    http.StatusUnauthorized,
+			wantErrorMsg:  "Missing or invalid Authorization header. Expected format: 'Bearer YOUR-API-KEY'",
+			wantErrorType: "invalid_request_error",
+		},
+		{
+			name:          "invalid api key returns 401",
+			method:        http.MethodPost,
+			path:          "/v1/embeddings",
+			body:          nil,
+			authHeader:    "Bearer invalid-key",
+			wantStatus:    http.StatusUnauthorized,
+			wantErrorMsg:  "Invalid API key",
+			wantErrorType: "invalid_request_error",
 		},
 		{
 			name:   "valid request with optional params returns 200",
@@ -43,6 +77,7 @@ func TestHandleEmbeddings(t *testing.T) {
 				Dimensions:     &dimensions,
 				User:           "user-123",
 			},
+			authHeader: "Bearer " + validAPIKey,
 			wantStatus: http.StatusOK,
 		},
 		{
@@ -54,6 +89,7 @@ func TestHandleEmbeddings(t *testing.T) {
 				Model:          "text-embedding-ada-002",
 				EncodingFormat: "invalid",
 			},
+			authHeader:    "Bearer " + validAPIKey,
 			wantStatus:    http.StatusBadRequest,
 			wantErrorMsg:  "Invalid encoding_format: must be either 'float' or 'base64'",
 			wantErrorType: "invalid_request_error",
@@ -66,6 +102,7 @@ func TestHandleEmbeddings(t *testing.T) {
 				Input: "",
 				Model: "text-embedding-ada-002",
 			},
+			authHeader:    "Bearer " + validAPIKey,
 			wantStatus:    http.StatusBadRequest,
 			wantErrorMsg:  "Missing required fields: 'input' and 'model' must not be empty",
 			wantErrorType: "invalid_request_error",
@@ -78,14 +115,20 @@ func TestHandleEmbeddings(t *testing.T) {
 				Input: "The food was delicious",
 				Model: "",
 			},
-			wantStatus: http.StatusBadRequest,
+			authHeader:    "Bearer " + validAPIKey,
+			wantStatus:    http.StatusBadRequest,
+			wantErrorMsg:  "Missing required fields: 'input' and 'model' must not be empty",
+			wantErrorType: "invalid_request_error",
 		},
 		{
-			name:       "invalid JSON returns 400",
-			method:     http.MethodPost,
-			path:       "/v1/embeddings",
-			body:       nil,
-			wantStatus: http.StatusBadRequest,
+			name:          "invalid JSON returns 400",
+			method:        http.MethodPost,
+			path:          "/v1/embeddings",
+			body:          nil,
+			authHeader:    "Bearer " + validAPIKey,
+			wantStatus:    http.StatusBadRequest,
+			wantErrorMsg:  "Invalid JSON payload",
+			wantErrorType: "invalid_request_error",
 		},
 		{
 			name:       "GET to correct path returns 405",
@@ -109,9 +152,31 @@ func TestHandleEmbeddings(t *testing.T) {
 				Input: "The food was delicious",
 				Model: "unsupported-model",
 			},
+			authHeader:    "Bearer " + validAPIKey,
 			wantStatus:    http.StatusBadRequest,
 			wantErrorMsg:  "Unsupported model: unsupported-model",
 			wantErrorType: "invalid_request_error",
+		},
+		{
+			name:          "invalid api key format returns 401",
+			method:        http.MethodPost,
+			path:          "/v1/embeddings",
+			body:          nil,
+			authHeader:    "Bearer invalid-format-key",
+			wantStatus:    http.StatusUnauthorized,
+			wantErrorMsg:  "Invalid API key format",
+			wantErrorType: "invalid_request_error",
+		},
+		{
+			name:   "valid api key format returns 200",
+			method: http.MethodPost,
+			path:   "/v1/embeddings",
+			body: &EmbeddingRequest{
+				Input: "The food was delicious",
+				Model: "text-embedding-ada-002",
+			},
+			authHeader: "Bearer " + validAPIKey,
+			wantStatus: http.StatusOK,
 		},
 	}
 
@@ -134,9 +199,12 @@ func TestHandleEmbeddings(t *testing.T) {
 			if tt.body != nil {
 				req.Header.Set("Content-Type", "application/json")
 			}
+			if tt.authHeader != "" {
+				req.Header.Set("Authorization", tt.authHeader)
+			}
 
 			rr := httptest.NewRecorder()
-			handler := newHandler(allowedModels)
+			handler := newHandler(allowedModels, apiKeyPattern)
 			handler.ServeHTTP(rr, req)
 
 			if status := rr.Code; status != tt.wantStatus {
