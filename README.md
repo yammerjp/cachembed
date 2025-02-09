@@ -28,8 +28,16 @@ Cachembed provides the following commands:
 
 ### 1. Start the Server
 
+#### Basic Usage
+
 ```sh
 cachembed serve [options]
+```
+
+#### With Automatic Database Migration
+
+```sh
+cachembed migrate-and-serve [options]
 ```
 
 #### Options
@@ -102,6 +110,16 @@ export CACHEMBED_LOG_LEVEL="debug"
 export CACHEMBED_UPSTREAM_URL="https://custom-api.com/v1/embeddings"
 export CACHEMBED_ALLOWED_MODELS="text-embedding-3-small,text-embedding-3-large"
 export CACHEMBED_API_KEY_PATTERN="^sk-[a-zA-Z0-9]+$"
+```
+
+## Docker
+
+docker image is available at [ghcr.io/yammerjp/cachembed](https://github.com/orgs/yammerjp/packages/container/package/cachembed)
+
+```bash
+docker run -d -v cachembed.db:/cachembed.db -p 8080:8080 ghcr.io/yammerjp/cachembed:latest-amd64
+# or
+docker run -d -v cachembed.db:/cachembed.db -p 8080:8080 ghcr.io/yammerjp/cachembed:latest-arm64
 ```
 
 ## License
