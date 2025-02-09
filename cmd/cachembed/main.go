@@ -8,10 +8,20 @@ import (
 	"github.com/alecthomas/kong"
 )
 
+type BuildInfo struct {
+	Version string
+	Commit  string
+	Date    string
+	BuiltBy string
+}
+
+var buildInfo BuildInfo
+
 type CLI struct {
 	Serve    ServeCmd   `cmd:"" help:"Start the Cachembed server."`
 	GC       GCCmd      `cmd:"" help:"Manually trigger garbage collection for LRU cache."`
 	Migrate  MigrateCmd `cmd:"" help:"Run database migrations."`
+	Version  VersionCmd `cmd:"" help:"Show version information."`
 	LogLevel string     `help:"Logging level (debug, info, warn, error)." env:"CACHEMBED_LOG_LEVEL" default:"info"`
 	DSN      string     `help:"Database connection string. Use file path for SQLite (e.g., 'cache.db') or URL for PostgreSQL (e.g., 'postgres://user:pass@localhost/dbname')." env:"CACHEMBED_DSN" default:"cachembed.db"`
 }
@@ -34,6 +44,8 @@ type GCCmd struct {
 
 type MigrateCmd struct{}
 
+type VersionCmd struct{}
+
 func setupLogger(levelStr string) {
 	var level slog.Level
 	switch levelStr {
@@ -54,7 +66,9 @@ func setupLogger(levelStr string) {
 	slog.SetDefault(logger)
 }
 
-func Main() {
+func Run(bi BuildInfo) {
+	buildInfo = bi
+
 	var cli CLI
 	ctx := kong.Parse(&cli,
 		kong.Name("cachembed"),
@@ -71,6 +85,8 @@ func Main() {
 		runGarbageCollection(cli.GC, cli.DSN)
 	case "migrate":
 		runMigration(cli.DSN)
+	case "version":
+		runVersion()
 	default:
 		log.Fatalf("Unknown command: %s", ctx.Command())
 	}
