@@ -206,7 +206,12 @@ func TestEmbeddingCacheOperations(t *testing.T) {
 
 		// 30分以上前のエントリを削除
 		duration := 30 * time.Minute
-		if err := db.DeleteEntriesBefore(duration, 0); err != nil {
+		var maxID int64
+		err = db.QueryRow("SELECT COALESCE(MAX(id), 0) FROM embeddings").Scan(&maxID)
+		if err != nil {
+			t.Fatalf("Failed to get max ID: %v", err)
+		}
+		if err := db.DeleteEntriesBefore(duration, 0, maxID); err != nil {
 			t.Fatalf("Failed to delete old entries: %v", err)
 		}
 
@@ -279,7 +284,12 @@ func TestDeleteOldEntries(t *testing.T) {
 
 	// GCを実行（古い5つのエントリを削除）
 	duration := 30 * time.Minute
-	if err := db.DeleteEntriesBefore(duration, 5); err != nil {
+	var maxID int64
+	err = db.QueryRow("SELECT COALESCE(MAX(id), 0) FROM embeddings").Scan(&maxID)
+	if err != nil {
+		t.Fatalf("Failed to get max ID: %v", err)
+	}
+	if err := db.DeleteEntriesBefore(duration, 0, maxID); err != nil {
 		t.Fatalf("Failed to run garbage collection: %v", err)
 	}
 
@@ -306,5 +316,183 @@ func TestDeleteOldEntries(t *testing.T) {
 
 	if oldCount != 0 {
 		t.Errorf("Expected no old entries after GC, got %d", oldCount)
+	}
+}
+
+func TestDeleteEntriesBeforeWithIDRange(t *testing.T) {
+	// テスト用の一時データベースを作成
+	tmpFile, err := os.CreateTemp("", "cachembed-test-*.db")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	tmpFile.Close()
+
+	db, err := NewDB(tmpFile.Name())
+	if err != nil {
+		t.Fatalf("Failed to create database: %v", err)
+	}
+	defer db.Close()
+
+	// テストデータ
+	model := "test-model"
+	embedding := []float32{0.1, 0.2, 0.3}
+
+	// 10個のエントリを作成
+	for i := 0; i < 10; i++ {
+		hash := fmt.Sprintf("hash%d", i)
+		if err := db.StoreEmbedding(hash, model, embedding); err != nil {
+			t.Fatalf("Failed to store embedding: %v", err)
+		}
+	}
+
+	// 最初の5つのエントリのアクセス時刻を1時間前に設定
+	for i := 0; i < 5; i++ {
+		hash := fmt.Sprintf("hash%d", i)
+		_, err := db.Exec(`
+			UPDATE embeddings 
+			SET last_accessed_at = datetime('now', '-1 hour')
+			WHERE input_hash = ?
+		`, hash)
+		if err != nil {
+			t.Fatalf("Failed to update access time: %v", err)
+		}
+	}
+
+	// ID 1-3の範囲で古いエントリを削除
+	duration := 30 * time.Minute
+	if err := db.DeleteEntriesBefore(duration, 1, 4); err != nil {
+		t.Fatalf("Failed to run garbage collection: %v", err)
+	}
+
+	// 削除されたエントリを確認
+	var count int
+	err = db.QueryRow(`
+		SELECT COUNT(*) FROM embeddings
+		WHERE id BETWEEN 1 AND 3
+		AND last_accessed_at < datetime('now', '-30 minutes')
+	`).Scan(&count)
+	if err != nil {
+		t.Fatalf("Failed to count deleted entries: %v", err)
+	}
+
+	if count != 0 {
+		t.Errorf("Expected no old entries in range 1-3, got %d", count)
+	}
+
+	// 範囲外のエントリが残っていることを確認
+	var totalCount int
+	err = db.QueryRow("SELECT COUNT(*) FROM embeddings").Scan(&totalCount)
+	if err != nil {
+		t.Fatalf("Failed to count remaining entries: %v", err)
+	}
+
+	expectedCount := 7 // 10 - 3 (deleted in range 1-3)
+	if totalCount != expectedCount {
+		t.Errorf("Expected %d total entries, got %d", expectedCount, totalCount)
+	}
+}
+
+// MockSleeper はテスト用のスリープモック
+type MockSleeper struct {
+	sleepCalls chan time.Duration
+}
+
+func NewMockSleeper() *MockSleeper {
+	return &MockSleeper{
+		sleepCalls: make(chan time.Duration, 10),
+	}
+}
+
+func (s *MockSleeper) Sleep(d time.Duration) {
+	s.sleepCalls <- d
+}
+
+func TestDeleteEntriesBeforeWithSleep(t *testing.T) {
+	// テスト用の一時データベースを作成
+	tmpFile, err := os.CreateTemp("", "cachembed-test-*.db")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	tmpFile.Close()
+
+	db, err := NewDB(tmpFile.Name())
+	if err != nil {
+		t.Fatalf("Failed to create database: %v", err)
+	}
+	defer db.Close()
+
+	// テストデータ
+	model := "test-model"
+	embedding := []float32{0.1, 0.2, 0.3}
+
+	// 10個のエントリを作成
+	for i := 0; i < 10; i++ {
+		hash := fmt.Sprintf("hash%d", i)
+		if err := db.StoreEmbedding(hash, model, embedding); err != nil {
+			t.Fatalf("Failed to store embedding: %v", err)
+		}
+	}
+
+	// 最初の5つのエントリのアクセス時刻を1時間前に設定
+	for i := 0; i < 5; i++ {
+		hash := fmt.Sprintf("hash%d", i)
+		_, err := db.Exec(`
+			UPDATE embeddings 
+			SET last_accessed_at = datetime('now', '-1 hour')
+			WHERE input_hash = ?
+		`, hash)
+		if err != nil {
+			t.Fatalf("Failed to update access time: %v", err)
+		}
+	}
+
+	// MockSleeperを作成
+	mockSleeper := NewMockSleeper()
+	db.sleeper = mockSleeper
+
+	// GCを実行
+	duration := 30 * time.Minute
+	sleep := 1 * time.Second
+	if err := db.DeleteEntriesBeforeWithSleep(duration, 1, 4, sleep); err != nil {
+		t.Fatalf("Failed to run garbage collection: %v", err)
+	}
+
+	// スリープが呼ばれたことを確認
+	select {
+	case d := <-mockSleeper.sleepCalls:
+		if d != sleep {
+			t.Errorf("Expected sleep duration %v, got %v", sleep, d)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Error("Expected sleep to be called")
+	}
+
+	// 削除されたエントリを確認
+	var count int
+	err = db.QueryRow(`
+		SELECT COUNT(*) FROM embeddings
+		WHERE id BETWEEN 1 AND 3
+		AND last_accessed_at < datetime('now', '-30 minutes')
+	`).Scan(&count)
+	if err != nil {
+		t.Fatalf("Failed to count deleted entries: %v", err)
+	}
+
+	if count != 0 {
+		t.Errorf("Expected no old entries in range 1-3, got %d", count)
+	}
+
+	// 範囲外のエントリが残っていることを確認
+	var totalCount int
+	err = db.QueryRow("SELECT COUNT(*) FROM embeddings").Scan(&totalCount)
+	if err != nil {
+		t.Fatalf("Failed to count remaining entries: %v", err)
+	}
+
+	expectedCount := 7 // 10 - 3 (deleted in range 1-3)
+	if totalCount != expectedCount {
+		t.Errorf("Expected %d total entries, got %d", expectedCount, totalCount)
 	}
 }

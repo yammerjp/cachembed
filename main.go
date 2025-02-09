@@ -31,8 +31,10 @@ type ServeCmd struct {
 }
 
 type GCCmd struct {
-	Before string `help:"Delete entries accessed before this time (e.g. '24h', '7d', '30d')." required:""`
-	Limit  int    `help:"Maximum number of entries to delete (0 means no limit)." default:"0"`
+	Before  string `help:"Delete entries older than this duration (e.g., '24h', '7d')" required:""`
+	StartID int64  `help:"Start ID for deletion (optional)"`
+	EndID   int64  `help:"End ID for deletion (optional)"`
+	Sleep   int    `help:"Sleep duration between iterations in seconds (optional)"`
 }
 
 type MigrateCmd struct{}
@@ -119,11 +121,6 @@ func runGarbageCollection(cmd GCCmd, dsn string) {
 		os.Exit(1)
 	}
 
-	slog.Info("running garbage collection",
-		"before", cmd.Before,
-		"limit", cmd.Limit,
-	)
-
 	db, err := NewDB(dsn)
 	if err != nil {
 		slog.Error("failed to initialize database", "error", err)
@@ -131,13 +128,27 @@ func runGarbageCollection(cmd GCCmd, dsn string) {
 	}
 	defer db.Close()
 
-	if err := db.DeleteEntriesBefore(duration, cmd.Limit); err != nil {
+	// 最大IDを取得（EndIDが指定されていない場合に使用）
+	var maxID int64
+	err = db.QueryRow("SELECT COALESCE(MAX(id), 0) FROM embeddings").Scan(&maxID)
+	if err != nil {
+		slog.Error("failed to get max ID", "error", err)
+		os.Exit(1)
+	}
+
+	// EndIDが0（未指定）の場合は最大IDを使用
+	endID := cmd.EndID
+	if endID == 0 {
+		endID = maxID
+	}
+
+	// GC実行
+	if err := db.DeleteEntriesBeforeWithSleep(duration, cmd.StartID, endID, time.Duration(cmd.Sleep)*time.Second); err != nil {
 		slog.Error("failed to run garbage collection", "error", err)
 		os.Exit(1)
 	}
 
 	slog.Info("garbage collection completed successfully")
-	os.Exit(0)
 }
 
 func runMigration(dsn string) {

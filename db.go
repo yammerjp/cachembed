@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/binary"
 	"fmt"
@@ -24,8 +25,16 @@ CREATE TABLE IF NOT EXISTS embeddings (
 CREATE INDEX IF NOT EXISTS idx_input_model ON embeddings(input_hash, model);
 `
 
-type DB struct {
-	*sql.DB
+// Sleeper はスリープ機能を抽象化するインターフェース
+type Sleeper interface {
+	Sleep(d time.Duration)
+}
+
+// RealSleeper は実際のtime.Sleepを使用する実装
+type RealSleeper struct{}
+
+func (s RealSleeper) Sleep(d time.Duration) {
+	time.Sleep(d)
 }
 
 // EmbeddingCache はキャッシュされた埋め込みデータを表します
@@ -44,6 +53,13 @@ func runMigrations(db *sql.DB) error {
 	return nil
 }
 
+// DB構造体にSleeperを追加
+type DB struct {
+	*sql.DB
+	sleeper Sleeper
+}
+
+// NewDB関数を修正
 func NewDB(dsn string) (*DB, error) {
 	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
@@ -65,7 +81,7 @@ func NewDB(dsn string) (*DB, error) {
 	}
 
 	slog.Info("database initialized", "dsn", dsn)
-	return &DB{db}, nil
+	return &DB{DB: db, sleeper: RealSleeper{}}, nil
 }
 
 func (db *DB) Close() error {
@@ -142,57 +158,137 @@ func (db *DB) StoreEmbedding(inputHash, model string, embedding []float32) error
 	return nil
 }
 
-// DeleteOldEntries はLRUキャッシュのガベージコレクションを実行します
-func (db *DB) DeleteOldEntries(limit int) error {
-	result, err := db.Exec(`
-		DELETE FROM embeddings 
-		WHERE id IN (
-			SELECT id FROM embeddings
-			ORDER BY last_accessed_at ASC
-			LIMIT ?
-		)
-	`, limit)
-	if err != nil {
-		return fmt.Errorf("failed to delete old entries: %w", err)
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to get affected rows: %w", err)
-	}
-
-	slog.Info("garbage collection completed",
-		"deleted_entries", rowsAffected,
-		"requested_limit", limit,
-	)
-
-	return nil
-}
-
 // DeleteEntriesBefore は指定された期間より前にアクセスされたエントリを削除します
-func (db *DB) DeleteEntriesBefore(age time.Duration, limit int) error {
-	query := `
-		DELETE FROM embeddings
-		WHERE last_accessed_at < datetime('now', ?)
-	`
-	args := []interface{}{fmt.Sprintf("-%d seconds", int(age.Seconds()))}
+// startID から endID までの範囲で指定された期間より前のエントリを削除します
+func (db *DB) DeleteEntriesBefore(age time.Duration, startID, endID int64) error {
+	const batchSize = 1000
+	var totalDeleted int64
+	currentID := startID
 
-	if limit > 0 {
-		query = `
+	ageSeconds := fmt.Sprintf("-%d seconds", int(age.Seconds()))
+
+	for currentID < endID {
+		// バッチの範囲を決定
+		batchEndID := currentID + batchSize
+		if batchEndID > endID {
+			batchEndID = endID
+		}
+
+		// 指定範囲のレコードを削除
+		query := `
 			DELETE FROM embeddings
-			WHERE id IN (
-				SELECT id FROM embeddings
-				WHERE last_accessed_at < datetime('now', ?)
-				ORDER BY last_accessed_at ASC
-				LIMIT ?
-			)
+			WHERE id >= ? AND id < ?
+			AND last_accessed_at < datetime('now', ?)
 		`
-		args = append(args, limit)
+		result, err := db.Exec(query, currentID, batchEndID, ageSeconds)
+		if err != nil {
+			return fmt.Errorf("failed to delete batch: %w", err)
+		}
+
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("failed to get affected rows: %w", err)
+		}
+
+		totalDeleted += rowsAffected
+
+		// 進捗をログに出力
+		slog.Info("batch deletion progress",
+			"current_id", currentID,
+			"batch_end_id", batchEndID,
+			"batch_deleted", rowsAffected,
+			"total_deleted", totalDeleted,
+		)
+
+		currentID = batchEndID
 	}
 
-	result, err := db.Exec(query, args...)
+	slog.Info("garbage collection completed",
+		"deleted_entries", totalDeleted,
+		"age", age,
+		"start_id", startID,
+		"end_id", endID,
+	)
+
+	return nil
+}
+
+// DeleteEntriesBeforeWithSleep を修正
+func (db *DB) DeleteEntriesBeforeWithSleep(age time.Duration, startID, endID int64, sleep time.Duration) error {
+	const batchSize = 1000
+	var totalDeleted int64
+	currentID := startID
+
+	ageSeconds := fmt.Sprintf("-%d seconds", int(age.Seconds()))
+
+	for currentID < endID {
+		// バッチの範囲を決定
+		batchEndID := currentID + batchSize
+		if batchEndID > endID {
+			batchEndID = endID
+		}
+
+		// 指定範囲のレコードを削除
+		query := `
+			DELETE FROM embeddings
+			WHERE id >= ? AND id < ?
+			AND last_accessed_at < datetime('now', ?)
+		`
+		result, err := db.Exec(query, currentID, batchEndID, ageSeconds)
+		if err != nil {
+			return fmt.Errorf("failed to delete batch: %w", err)
+		}
+
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("failed to get affected rows: %w", err)
+		}
+
+		totalDeleted += rowsAffected
+
+		// 進捗をログに出力
+		slog.Info("batch deletion progress",
+			"current_id", currentID,
+			"batch_end_id", batchEndID,
+			"batch_deleted", rowsAffected,
+			"total_deleted", totalDeleted,
+		)
+
+		// スリープ処理を修正
+		if sleep > 0 {
+			db.sleeper.Sleep(sleep)
+		}
+
+		currentID = batchEndID
+	}
+
+	slog.Info("garbage collection completed",
+		"deleted_entries", totalDeleted,
+		"age", age,
+		"start_id", startID,
+		"end_id", endID,
+	)
+
+	return nil
+}
+
+// GetMaxID は現在のデータベース内の最大IDを返します
+func (d *DB) GetMaxID(ctx context.Context) (int64, error) {
+	var maxID int64
+	query := "SELECT MAX(id) FROM items"
+	err := d.DB.QueryRowContext(ctx, query).Scan(&maxID)
 	if err != nil {
-		return fmt.Errorf("failed to delete old entries: %w", err)
+		return 0, fmt.Errorf("failed to get max id: %w", err)
+	}
+	return maxID, nil
+}
+
+// DeleteByID は指定されたIDのエントリを削除します
+func (db *DB) DeleteByID(ctx context.Context, id int64) error {
+	query := `DELETE FROM embeddings WHERE id = ?`
+	result, err := db.ExecContext(ctx, query, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete entry with id %d: %w", id, err)
 	}
 
 	rowsAffected, err := result.RowsAffected()
@@ -200,20 +296,9 @@ func (db *DB) DeleteEntriesBefore(age time.Duration, limit int) error {
 		return fmt.Errorf("failed to get affected rows: %w", err)
 	}
 
-	slog.Info("garbage collection completed",
-		"deleted_entries", rowsAffected,
-		"age", age,
-		"limit", limit,
-	)
+	if rowsAffected > 0 {
+		slog.Debug("deleted entry", "id", id)
+	}
 
 	return nil
-}
-
-// ヘルパー関数
-func interfaceSlice(slice []int64) []interface{} {
-	interfaces := make([]interface{}, len(slice))
-	for i, v := range slice {
-		interfaces[i] = v
-	}
-	return interfaces
 }
