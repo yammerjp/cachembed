@@ -78,6 +78,13 @@ func startServer(cmd ServeCmd) {
 		"allowed_models", cmd.AllowedModels,
 	)
 
+	db, err := NewDB(cmd.DSN)
+	if err != nil {
+		slog.Error("failed to initialize database", "error", err)
+		os.Exit(1)
+	}
+	defer db.Close()
+
 	handler := newHandler(cmd.AllowedModels, cmd.APIKeyPattern, cmd.UpstreamURL)
 
 	addr := fmt.Sprintf("%s:%d", cmd.Host, cmd.Port)
