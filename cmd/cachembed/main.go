@@ -18,12 +18,13 @@ type BuildInfo struct {
 var buildInfo BuildInfo
 
 type CLI struct {
-	Serve    ServeCmd   `cmd:"" help:"Start the Cachembed server."`
-	GC       GCCmd      `cmd:"" help:"Manually trigger garbage collection for LRU cache."`
-	Migrate  MigrateCmd `cmd:"" help:"Run database migrations."`
-	Version  VersionCmd `cmd:"" help:"Show version information."`
-	LogLevel string     `help:"Logging level (debug, info, warn, error)." env:"CACHEMBED_LOG_LEVEL" default:"info"`
-	DSN      string     `help:"Database connection string. Use file path for SQLite (e.g., 'cache.db') or URL for PostgreSQL (e.g., 'postgres://user:pass@localhost/dbname')." env:"CACHEMBED_DSN" default:"cachembed.db"`
+	Serve           ServeCmd           `cmd:"" help:"Start the Cachembed server."`
+	GC              GCCmd              `cmd:"" help:"Manually trigger garbage collection for LRU cache."`
+	Migrate         MigrateCmd         `cmd:"" help:"Run database migrations."`
+	MigrateAndServe MigrateAndServeCmd `cmd:"" help:"Run database migrations and start the server."`
+	Version         VersionCmd         `cmd:"" help:"Show version information."`
+	LogLevel        string             `help:"Logging level (debug, info, warn, error)." env:"CACHEMBED_LOG_LEVEL" default:"info"`
+	DSN             string             `help:"Database connection string. Use file path for SQLite (e.g., 'cache.db') or URL for PostgreSQL (e.g., 'postgres://user:pass@localhost/dbname')." env:"CACHEMBED_DSN" default:"cachembed.db"`
 }
 
 type ServeCmd struct {
@@ -43,6 +44,10 @@ type GCCmd struct {
 }
 
 type MigrateCmd struct{}
+
+type MigrateAndServeCmd struct {
+	ServeCmd
+}
 
 type VersionCmd struct{}
 
@@ -85,6 +90,9 @@ func Run(bi BuildInfo) {
 		runGarbageCollection(cli.GC, cli.DSN)
 	case "migrate":
 		runMigration(cli.DSN)
+	case "migrate-and-serve":
+		runMigration(cli.DSN)
+		runServer(cli.MigrateAndServe.ServeCmd, cli.DSN)
 	case "version":
 		runVersion()
 	default:
