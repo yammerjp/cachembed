@@ -17,10 +17,11 @@ type CLI struct {
 }
 
 type ServeCmd struct {
-	DSN         string `help:"Path to the SQLite database file." default:"cachembed.db"`
-	Host        string `help:"Host to bind the server." default:"127.0.0.1"`
-	Port        int    `help:"Port to run the server on." default:"8080"`
-	UpstreamURL string `help:"URL of the upstream embedding API." env:"CACHEMBED_UPSTREAM_URL" default:"https://api.openai.com/v1/embeddings"`
+	DSN           string   `help:"Path to the SQLite database file." default:"cachembed.db"`
+	Host          string   `help:"Host to bind the server." default:"127.0.0.1"`
+	Port          int      `help:"Port to run the server on." default:"8080"`
+	UpstreamURL   string   `help:"URL of the upstream embedding API." env:"CACHEMBED_UPSTREAM_URL" default:"https://api.openai.com/v1/embeddings"`
+	AllowedModels []string `help:"List of allowed embedding models." env:"CACHEMBED_ALLOWED_MODELS" default:"text-embedding-3-small,text-embedding-3-large,text-embedding-ada-002"`
 }
 
 type GCCmd struct {
@@ -70,8 +71,9 @@ func main() {
 func startServer(cmd ServeCmd) {
 	fmt.Printf("Starting server on %s:%d using database: %s\n", cmd.Host, cmd.Port, cmd.DSN)
 	fmt.Printf("Upstream API: %s\n", cmd.UpstreamURL)
+	fmt.Printf("Allowed models: %v\n", cmd.AllowedModels)
 
-	handler := http.HandlerFunc(handleEmbeddings)
+	handler := newHandler(cmd.AllowedModels)
 
 	addr := fmt.Sprintf("%s:%d", cmd.Host, cmd.Port)
 	if err := http.ListenAndServe(addr, handler); err != nil {
