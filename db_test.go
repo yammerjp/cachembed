@@ -177,7 +177,7 @@ func TestEmbeddingCacheOperations(t *testing.T) {
 	// GC操作のテスト
 	t.Run("garbage collection", func(t *testing.T) {
 		// 既存のデータをクリア
-		_, err := db.Exec("DELETE FROM embeddings")
+		_, err := db.Exec(db.dialect.ConvertPlaceholders("DELETE FROM embeddings"))
 		if err != nil {
 			t.Fatalf("Failed to clear embeddings: %v", err)
 		}
@@ -190,9 +190,9 @@ func TestEmbeddingCacheOperations(t *testing.T) {
 		for i := 0; i < 5; i++ {
 			hash := fmt.Sprintf("old_hash%d", i)
 			embeddingData := encodeEmbedding([]float32{0.1, 0.2, 0.3})
-			_, err := db.Exec(db.convertPlaceholders(`
+			_, err := db.Exec(db.dialect.ConvertPlaceholders(`
 				INSERT INTO embeddings (input_hash, model, embedding_data, created_at, last_accessed_at)
-				VALUES (?, ?, ?, ?, ?)
+				VALUES ($1, $2, $3, $4, $5)
 			`), hash, model, embeddingData, oldTime, oldTime)
 			if err != nil {
 				t.Fatalf("Failed to create old entry: %v", err)
@@ -232,9 +232,9 @@ func TestEmbeddingCacheOperations(t *testing.T) {
 		// 古いエントリが削除されたことを確認
 		thresholdTime := baseTime.Add(-30 * time.Minute)
 		var oldCount int
-		err = db.QueryRow(db.convertPlaceholders(`
+		err = db.QueryRow(db.dialect.ConvertPlaceholders(`
 			SELECT COUNT(*) FROM embeddings
-			WHERE last_accessed_at < ?
+			WHERE last_accessed_at < $1
 		`), thresholdTime).Scan(&oldCount)
 		if err != nil {
 			t.Fatalf("Failed to count old entries: %v", err)
@@ -272,10 +272,10 @@ func TestDeleteOldEntries(t *testing.T) {
 	// まず古いエントリを作成（1時間前）
 	for i := 0; i < 5; i++ {
 		hash := fmt.Sprintf("old_hash%d", i)
-		_, err := db.Exec(`
+		_, err := db.Exec(db.dialect.ConvertPlaceholders(`
 			INSERT INTO embeddings (input_hash, model, embedding_data, created_at, last_accessed_at)
-			VALUES (?, ?, ?, ?, ?)
-		`, hash, model, encodeEmbedding(embedding), oldTime, oldTime)
+			VALUES ($1, $2, $3, $4, $5)
+		`), hash, model, encodeEmbedding(embedding), oldTime, oldTime)
 		if err != nil {
 			t.Fatalf("Failed to create old entry: %v", err)
 		}
@@ -290,11 +290,11 @@ func TestDeleteOldEntries(t *testing.T) {
 	}
 
 	// デバッグ用のログ出力
-	rows, err := db.Query(`
+	rows, err := db.Query(db.dialect.ConvertPlaceholders(`
 		SELECT id, input_hash, last_accessed_at 
 		FROM embeddings 
 		ORDER BY id
-	`)
+	`))
 	if err != nil {
 		t.Fatalf("Failed to query entries before deletion: %v", err)
 	}
@@ -322,11 +322,11 @@ func TestDeleteOldEntries(t *testing.T) {
 	}
 
 	// デバッグ用のログ出力
-	rows, err = db.Query(`
+	rows, err = db.Query(db.dialect.ConvertPlaceholders(`
 		SELECT id, input_hash, last_accessed_at 
 		FROM embeddings 
 		ORDER BY id
-	`)
+	`))
 	if err != nil {
 		t.Fatalf("Failed to query entries after deletion: %v", err)
 	}
@@ -356,10 +356,10 @@ func TestDeleteOldEntries(t *testing.T) {
 	// 古いエントリが削除されたことを確認
 	thresholdTime := baseTime.Add(-30 * time.Minute)
 	var oldCount int
-	err = db.QueryRow(`
+	err = db.QueryRow(db.dialect.ConvertPlaceholders(`
 		SELECT COUNT(*) FROM embeddings
-		WHERE last_accessed_at < ?
-	`, thresholdTime).Scan(&oldCount)
+		WHERE last_accessed_at < $1
+	`), thresholdTime).Scan(&oldCount)
 	if err != nil {
 		t.Fatalf("Failed to count old entries: %v", err)
 	}
@@ -403,11 +403,11 @@ func TestDeleteEntriesBeforeWithIDRange(t *testing.T) {
 	// 最初の5つのエントリのアクセス時刻を1時間前に設定
 	for i := 0; i < 5; i++ {
 		hash := fmt.Sprintf("hash%d", i)
-		_, err := db.Exec(`
+		_, err := db.Exec(db.dialect.ConvertPlaceholders(`
 			UPDATE embeddings 
-			SET last_accessed_at = ?
-			WHERE input_hash = ?
-		`, oldTime, hash)
+			SET last_accessed_at = $1
+			WHERE input_hash = $2
+		`), oldTime, hash)
 		if err != nil {
 			t.Fatalf("Failed to update access time: %v", err)
 		}
@@ -420,11 +420,11 @@ func TestDeleteEntriesBeforeWithIDRange(t *testing.T) {
 	}
 
 	// デバッグ用のログ出力を追加
-	rows, err := db.Query(`
+	rows, err := db.Query(db.dialect.ConvertPlaceholders(`
 		SELECT id, input_hash, last_accessed_at 
 		FROM embeddings 
 		ORDER BY id
-	`)
+	`))
 	if err != nil {
 		t.Fatalf("Failed to query entries after deletion: %v", err)
 	}
@@ -443,11 +443,11 @@ func TestDeleteEntriesBeforeWithIDRange(t *testing.T) {
 	// 削除されたエントリを確認
 	thresholdTime := baseTime.Add(-30 * time.Minute)
 	var count int
-	err = db.QueryRow(db.convertPlaceholders(`
+	err = db.QueryRow(db.dialect.ConvertPlaceholders(`
 		SELECT COUNT(*) FROM embeddings
-		WHERE id BETWEEN 1 AND 3
-		AND last_accessed_at < ?
-	`), thresholdTime).Scan(&count)
+		WHERE id BETWEEN $1 AND $2
+		AND last_accessed_at < $3
+	`), 1, 3, thresholdTime).Scan(&count)
 	if err != nil {
 		t.Fatalf("Failed to count deleted entries: %v", err)
 	}
@@ -515,22 +515,22 @@ func TestDeleteEntriesBeforeWithSleep(t *testing.T) {
 	// 最初の5つのエントリのアクセス時刻を1時間前に設定
 	for i := 0; i < 5; i++ {
 		hash := fmt.Sprintf("hash%d", i)
-		_, err := db.Exec(`
+		_, err := db.Exec(db.dialect.ConvertPlaceholders(`
 			UPDATE embeddings 
-			SET last_accessed_at = ?
-			WHERE input_hash = ?
-		`, oldTime, hash)
+			SET last_accessed_at = $1
+			WHERE input_hash = $2
+		`), oldTime, hash)
 		if err != nil {
 			t.Fatalf("Failed to update access time: %v", err)
 		}
 	}
 
 	// デバッグ用のログ出力は維持
-	rows, err := db.Query(`
+	rows, err := db.Query(db.dialect.ConvertPlaceholders(`
 		SELECT id, input_hash, last_accessed_at 
 		FROM embeddings 
 		ORDER BY id
-	`)
+	`))
 	if err != nil {
 		t.Fatalf("Failed to query entries before deletion: %v", err)
 	}
@@ -553,11 +553,11 @@ func TestDeleteEntriesBeforeWithSleep(t *testing.T) {
 	}
 
 	// デバッグ用のログ出力は維持
-	rows, err = db.Query(`
+	rows, err = db.Query(db.dialect.ConvertPlaceholders(`
 		SELECT id, input_hash, last_accessed_at 
 		FROM embeddings 
 		ORDER BY id
-	`)
+	`))
 	if err != nil {
 		t.Fatalf("Failed to query entries after deletion: %v", err)
 	}
@@ -588,11 +588,11 @@ func TestDeleteEntriesBeforeWithSleep(t *testing.T) {
 	// 削除されたエントリを確認
 	thresholdTime := baseTime.Add(-30 * time.Minute)
 	var count int
-	err = db.QueryRow(db.convertPlaceholders(`
+	err = db.QueryRow(db.dialect.ConvertPlaceholders(`
 		SELECT COUNT(*) FROM embeddings
-		WHERE id BETWEEN 1 AND 3
-		AND last_accessed_at < ?
-	`), thresholdTime).Scan(&count)
+		WHERE id BETWEEN $1 AND $2
+		AND last_accessed_at < $3
+	`), 1, 3, thresholdTime).Scan(&count)
 	if err != nil {
 		t.Fatalf("Failed to count deleted entries: %v", err)
 	}
@@ -656,7 +656,7 @@ func TestDatabaseOperations(t *testing.T) {
 // 埋め込みデータの基本操作テスト
 func testEmbeddingOperations(t *testing.T, db *DB) {
 	// テーブルをクリーンアップ
-	_, err := db.Exec("DELETE FROM embeddings")
+	_, err := db.Exec(db.dialect.ConvertPlaceholders("DELETE FROM embeddings"))
 	if err != nil {
 		t.Fatalf("Failed to cleanup table: %v", err)
 	}
@@ -698,7 +698,7 @@ func testEmbeddingOperations(t *testing.T, db *DB) {
 // ガベージコレクションのテスト
 func testGarbageCollection(t *testing.T, db *DB) {
 	// テーブルをクリーンアップ
-	_, err := db.Exec("DELETE FROM embeddings")
+	_, err := db.Exec(db.dialect.ConvertPlaceholders("DELETE FROM embeddings"))
 	if err != nil {
 		t.Fatalf("Failed to cleanup table: %v", err)
 	}
@@ -712,9 +712,9 @@ func testGarbageCollection(t *testing.T, db *DB) {
 	for i := 0; i < 5; i++ {
 		hash := fmt.Sprintf("old_hash%d", i)
 		embeddingData := encodeEmbedding([]float32{0.1, 0.2, 0.3})
-		_, err := db.Exec(db.convertPlaceholders(`
+		_, err := db.Exec(db.dialect.ConvertPlaceholders(`
 			INSERT INTO embeddings (input_hash, model, embedding_data, created_at, last_accessed_at)
-			VALUES (?, ?, ?, ?, ?)
+			VALUES ($1, $2, $3, $4, $5)
 		`), hash, model, embeddingData, oldTime, oldTime)
 		if err != nil {
 			t.Fatalf("Failed to create old entry: %v", err)
@@ -730,11 +730,11 @@ func testGarbageCollection(t *testing.T, db *DB) {
 	}
 
 	// デバッグ用：削除前の状態を確認
-	rows, err := db.Query(`
+	rows, err := db.Query(db.dialect.ConvertPlaceholders(`
 		SELECT id, input_hash, last_accessed_at 
 		FROM embeddings 
 		ORDER BY id
-	`)
+	`))
 	if err != nil {
 		t.Fatalf("Failed to query entries before deletion: %v", err)
 	}
@@ -763,11 +763,11 @@ func testGarbageCollection(t *testing.T, db *DB) {
 	}
 
 	// デバッグ用：削除後の状態を確認
-	rows, err = db.Query(`
+	rows, err = db.Query(db.dialect.ConvertPlaceholders(`
 		SELECT id, input_hash, last_accessed_at 
 		FROM embeddings 
 		ORDER BY id
-	`)
+	`))
 	if err != nil {
 		t.Fatalf("Failed to query entries after deletion: %v", err)
 	}
@@ -797,9 +797,9 @@ func testGarbageCollection(t *testing.T, db *DB) {
 	// 古いエントリが削除されたことを確認
 	thresholdTime := baseTime.Add(-30 * time.Minute)
 	var oldCount int
-	err = db.QueryRow(db.convertPlaceholders(`
+	err = db.QueryRow(db.dialect.ConvertPlaceholders(`
 		SELECT COUNT(*) FROM embeddings
-		WHERE last_accessed_at < ?
+		WHERE last_accessed_at < $1
 	`), thresholdTime).Scan(&oldCount)
 	if err != nil {
 		t.Fatalf("Failed to count old entries: %v", err)
@@ -813,7 +813,7 @@ func testGarbageCollection(t *testing.T, db *DB) {
 // ID範囲削除のテスト
 func testIDRangeDeletion(t *testing.T, db *DB) {
 	// テーブルをクリーンアップ
-	_, err := db.Exec("DELETE FROM embeddings")
+	_, err := db.Exec(db.dialect.ConvertPlaceholders("DELETE FROM embeddings"))
 	if err != nil {
 		t.Fatalf("Failed to cleanup table: %v", err)
 	}
@@ -827,9 +827,9 @@ func testIDRangeDeletion(t *testing.T, db *DB) {
 	for i := 0; i < 5; i++ {
 		hash := fmt.Sprintf("old_hash%d", i)
 		embeddingData := encodeEmbedding(embedding)
-		_, err := db.Exec(db.convertPlaceholders(`
+		_, err := db.Exec(db.dialect.ConvertPlaceholders(`
 			INSERT INTO embeddings (input_hash, model, embedding_data, created_at, last_accessed_at)
-			VALUES (?, ?, ?, ?, ?)
+			VALUES ($1, $2, $3, $4, $5)
 		`), hash, model, embeddingData, oldTime, oldTime)
 		if err != nil {
 			t.Fatalf("Failed to create old entry: %v", err)
@@ -873,10 +873,10 @@ func testIDRangeDeletion(t *testing.T, db *DB) {
 	// 削除されたエントリを確認
 	thresholdTime := baseTime.Add(-30 * time.Minute)
 	var count int
-	err = db.QueryRow(db.convertPlaceholders(`
+	err = db.QueryRow(db.dialect.ConvertPlaceholders(`
 		SELECT COUNT(*) FROM embeddings
-		WHERE id BETWEEN ? AND ?
-		AND last_accessed_at < ?
+		WHERE id BETWEEN $1 AND $2
+		AND last_accessed_at < $3
 	`), minID, endID-1, thresholdTime).Scan(&count)
 	if err != nil {
 		t.Fatalf("Failed to count deleted entries: %v", err)
@@ -890,7 +890,7 @@ func testIDRangeDeletion(t *testing.T, db *DB) {
 // バッチ削除とスリープのテスト
 func testBatchDeletionWithSleep(t *testing.T, db *DB) {
 	// テーブルをクリーンアップ
-	_, err := db.Exec("DELETE FROM embeddings")
+	_, err := db.Exec(db.dialect.ConvertPlaceholders("DELETE FROM embeddings"))
 	if err != nil {
 		t.Fatalf("Failed to cleanup table: %v", err)
 	}
