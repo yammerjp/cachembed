@@ -36,9 +36,9 @@ cachembed serve [options]
 
 | Flag | Environment Variable | Description | Default |
 |------|----------------------|-------------|---------|
-| -H, --host | CACHEMBED_HOST | Host to bind the server | 127.0.0.1 |
-| -p, --port | CACHEMBED_PORT | Port to run the server on | 8080 |
-| -u, --upstream-url | CACHEMBED_UPSTREAM_URL | OpenAI embedding API endpoint | https://api.openai.com/v1/embeddings |
+| --host | CACHEMBED_HOST | Host to bind the server | 127.0.0.1 |
+| --port | CACHEMBED_PORT | Port to run the server on | 8080 |
+| --upstream-url | CACHEMBED_UPSTREAM_URL | OpenAI embedding API endpoint | https://api.openai.com/v1/embeddings |
 | --allowed-models | CACHEMBED_ALLOWED_MODELS | Comma-separated list of allowed models | text-embedding-3-small,text-embedding-3-large,text-embedding-ada-002 |
 | --api-key-pattern | CACHEMBED_API_KEY_PATTERN | Regular expression pattern for API key validation | ^sk-[a-zA-Z0-9]+$ |
 | --dsn | CACHEMBED_DSN | Database connection string (SQLite file path or PostgreSQL URL) | cachembed.db |
@@ -47,7 +47,7 @@ cachembed serve [options]
 #### Example
 
 ```bash
-cachembed serve -p 9090 --dsn "postgres://user:pass@localhost/cachedb"
+cachembed serve --host 0.0.0.0 --port 9090 --dsn "postgres://user:pass@localhost/cachedb"
 ```
 
 ### 2. Run Garbage Collection (GC)
