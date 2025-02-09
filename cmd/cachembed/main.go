@@ -12,13 +12,13 @@ type CLI struct {
 	Serve    ServeCmd   `cmd:"" help:"Start the Cachembed server."`
 	GC       GCCmd      `cmd:"" help:"Manually trigger garbage collection for LRU cache."`
 	Migrate  MigrateCmd `cmd:"" help:"Run database migrations."`
-	LogLevel string     `help:"Logging level (debug, info, warn, error)." default:"info"`
-	DSN      string     `help:"Database connection string. Use file path for SQLite (e.g., 'cache.db') or URL for PostgreSQL (e.g., 'postgres://user:pass@localhost/dbname')." default:"cachembed.db"`
+	LogLevel string     `help:"Logging level (debug, info, warn, error)." env:"CACHEMBED_LOG_LEVEL" default:"info"`
+	DSN      string     `help:"Database connection string. Use file path for SQLite (e.g., 'cache.db') or URL for PostgreSQL (e.g., 'postgres://user:pass@localhost/dbname')." env:"CACHEMBED_DSN" default:"cachembed.db"`
 }
 
 type ServeCmd struct {
-	Host          string   `help:"Host to bind the server." default:"127.0.0.1"`
-	Port          int      `help:"Port to run the server on." default:"8080"`
+	Host          string   `help:"Host to bind the server." env:"CACHEMBED_HOST" default:"127.0.0.1"`
+	Port          int      `help:"Port to run the server on." env:"CACHEMBED_PORT" default:"8080"`
 	UpstreamURL   string   `help:"URL of the upstream embedding API." env:"CACHEMBED_UPSTREAM_URL" default:"https://api.openai.com/v1/embeddings"`
 	AllowedModels []string `help:"List of allowed embedding models." env:"CACHEMBED_ALLOWED_MODELS" default:"text-embedding-3-small,text-embedding-3-large,text-embedding-ada-002"`
 	APIKeyPattern string   `help:"Regular expression pattern for API key validation." env:"CACHEMBED_API_KEY_PATTERN" default:"^sk-[a-zA-Z0-9]+$"`
