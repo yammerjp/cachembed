@@ -125,7 +125,7 @@ func TestEmbeddingCacheOperations(t *testing.T) {
 	defer db.Close()
 
 	// マイグレーションを実行
-	if err := RunMigrations(db.DB, SQLiteDialect{}); err != nil {
+	if err := db.RunMigrations(); err != nil {
 		t.Fatalf("Failed to run migrations: %v", err)
 	}
 
@@ -214,7 +214,7 @@ func TestEmbeddingCacheOperations(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to get max ID: %v", err)
 		}
-		if err := db.DeleteEntriesBeforeWithSleep(duration, 0, maxID+1, 0); err != nil {
+		if err := db.DeleteEntriesBeforeWithSleep(duration, 0, maxID+1, 1000, 0); err != nil {
 			t.Fatalf("Failed to delete old entries: %v", err)
 		}
 
@@ -317,7 +317,7 @@ func TestDeleteOldEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to get max ID: %v", err)
 	}
-	if err := db.DeleteEntriesBeforeWithSleep(duration, 0, maxID+1, 0); err != nil {
+	if err := db.DeleteEntriesBeforeWithSleep(duration, 0, maxID+1, 1000, 0); err != nil {
 		t.Fatalf("Failed to run garbage collection: %v", err)
 	}
 
@@ -415,7 +415,7 @@ func TestDeleteEntriesBeforeWithIDRange(t *testing.T) {
 
 	// ID 1-3の範囲で古いエントリを削除
 	duration := 30 * time.Minute
-	if err := db.DeleteEntriesBeforeWithSleep(duration, 1, 4, 0); err != nil {
+	if err := db.DeleteEntriesBeforeWithSleep(duration, 1, 4, 1000, 0); err != nil {
 		t.Fatalf("Failed to run garbage collection: %v", err)
 	}
 
@@ -548,7 +548,7 @@ func TestDeleteEntriesBeforeWithSleep(t *testing.T) {
 
 	// ID 1-3の範囲で古いエントリを削除
 	duration := 30 * time.Minute
-	if err := db.DeleteEntriesBeforeWithSleep(duration, 1, 4, 1*time.Second); err != nil {
+	if err := db.DeleteEntriesBeforeWithSleep(duration, 1, 4, 1000, 1*time.Second); err != nil {
 		t.Fatalf("Failed to run garbage collection: %v", err)
 	}
 
@@ -758,7 +758,7 @@ func testGarbageCollection(t *testing.T, db *DB) {
 		t.Fatalf("Failed to get max ID: %v", err)
 	}
 
-	if err := db.DeleteEntriesBeforeWithSleep(duration, 0, maxID+1, 0); err != nil {
+	if err := db.DeleteEntriesBeforeWithSleep(duration, 0, maxID+1, 1000, 0); err != nil {
 		t.Fatalf("Failed to run garbage collection: %v", err)
 	}
 
@@ -854,7 +854,7 @@ func testIDRangeDeletion(t *testing.T, db *DB) {
 	// 最初の3つのエントリを削除
 	endID := minID + 3
 	duration := 30 * time.Minute
-	if err := db.DeleteEntriesBeforeWithSleep(duration, minID, endID, 0); err != nil {
+	if err := db.DeleteEntriesBeforeWithSleep(duration, minID, endID, 1000, 0); err != nil {
 		t.Fatalf("Failed to run garbage collection: %v", err)
 	}
 

@@ -28,6 +28,7 @@ type GCCmd struct {
 	Before  string `help:"Delete entries older than this duration (e.g., '24h', '7d')" required:""`
 	StartID int64  `help:"Start ID for deletion (optional)"`
 	EndID   int64  `help:"End ID for deletion (optional)"`
+	Batch   int    `help:"Batch size for deletion (optional)" default:"1000"`
 	Sleep   int    `help:"Sleep duration between iterations in seconds (optional)"`
 }
 

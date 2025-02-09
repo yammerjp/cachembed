@@ -1,7 +1,6 @@
 package cachembed
 
 import (
-	"database/sql"
 	"log/slog"
 	"os"
 
@@ -11,13 +10,7 @@ import (
 func runMigration(dsn string) {
 	slog.Info("running database migration", "dsn", dsn)
 
-	config, err := storage.ParseDSN(dsn)
-	if err != nil {
-		slog.Error("failed to parse DSN", "error", err)
-		os.Exit(1)
-	}
-
-	db, err := sql.Open(config.Driver, config.DSN)
+	db, err := storage.NewDB(dsn)
 	if err != nil {
 		slog.Error("failed to open database", "error", err)
 		os.Exit(1)
@@ -29,8 +22,7 @@ func runMigration(dsn string) {
 		os.Exit(1)
 	}
 
-	// マイグレーションの実行（Dialectを渡す）
-	if err := storage.RunMigrations(db, config.Dialect); err != nil {
+	if err := db.RunMigrations(); err != nil {
 		slog.Error("failed to run migrations", "error", err)
 		os.Exit(1)
 	}

@@ -39,7 +39,7 @@ func runGarbageCollection(cmd GCCmd, dsn string) {
 	}
 
 	// GC実行
-	if err := db.DeleteEntriesBeforeWithSleep(duration, cmd.StartID, endID, time.Duration(cmd.Sleep)*time.Second); err != nil {
+	if err := db.DeleteEntriesBeforeWithSleep(duration, cmd.StartID, endID, int64(cmd.Batch), time.Duration(cmd.Sleep)*time.Second); err != nil {
 		slog.Error("failed to run garbage collection", "error", err)
 		os.Exit(1)
 	}
