@@ -1,4 +1,4 @@
-package main
+package storage
 
 import (
 	"bytes"
@@ -93,7 +93,7 @@ type EmbeddingCache struct {
 }
 
 // runMigrations はデータベースのマイグレーションを実行します
-func runMigrations(db *sql.DB, dialect Dialect) error {
+func RunMigrations(db *sql.DB, dialect Dialect) error {
 	// テーブルの作成
 	createTableSQL := fmt.Sprintf(sqlCreateTable,
 		dialect.GetPrimaryKeyType(),
@@ -178,7 +178,7 @@ func NewDB(dsn string) (*DB, error) {
 	}
 
 	// マイグレーションを実行
-	if err := runMigrations(db, config.Dialect); err != nil {
+	if err := RunMigrations(db, config.Dialect); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to run migrations: %w", err)
 	}
@@ -344,4 +344,13 @@ func (db *DB) DeleteEntriesBeforeWithSleep(threshold time.Duration, startID, end
 	}
 
 	return nil
+}
+
+func (db *DB) GetMaxID() (int64, error) {
+	var maxID int64
+	err := db.QueryRow("SELECT COALESCE(MAX(id), 0) FROM embeddings").Scan(&maxID)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get max ID: %w", err)
+	}
+	return maxID, nil
 }

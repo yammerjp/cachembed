@@ -1,4 +1,4 @@
-package main
+package handler
 
 import (
 	"bytes"
@@ -7,6 +7,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+
+	"github.com/yammerjp/cachembed/internal/storage"
+	"github.com/yammerjp/cachembed/internal/upstream"
 )
 
 func TestHandleEmbeddings(t *testing.T) {
@@ -18,7 +21,7 @@ func TestHandleEmbeddings(t *testing.T) {
 	defer os.Remove(tmpFile.Name())
 	tmpFile.Close()
 
-	db, err := NewDB(tmpFile.Name())
+	db, err := storage.NewDB(tmpFile.Name())
 	if err != nil {
 		t.Fatalf("Failed to create database: %v", err)
 	}
@@ -26,7 +29,7 @@ func TestHandleEmbeddings(t *testing.T) {
 
 	// モックサーバーの設定（シンプルな成功レスポンスのみ）
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		resp := EmbeddingResponse{
+		resp := upstream.EmbeddingResponse{
 			Object: "list",
 			Data: []struct {
 				Object    string    `json:"object"`
@@ -60,7 +63,7 @@ func TestHandleEmbeddings(t *testing.T) {
 		name         string
 		method       string
 		path         string
-		body         *EmbeddingRequest
+		body         *upstream.EmbeddingRequest
 		authHeader   string
 		wantStatus   int
 		wantCacheHit bool // キャッシュヒットを期待するかどうか
@@ -70,7 +73,7 @@ func TestHandleEmbeddings(t *testing.T) {
 			name:   "valid request - initial (cache miss)",
 			method: "POST",
 			path:   "/v1/embeddings",
-			body: &EmbeddingRequest{
+			body: &upstream.EmbeddingRequest{
 				Input: "Hello, World!",
 				Model: "text-embedding-ada-002",
 			},
@@ -83,7 +86,7 @@ func TestHandleEmbeddings(t *testing.T) {
 			name:   "valid request - cached (cache hit)",
 			method: "POST",
 			path:   "/v1/embeddings",
-			body: &EmbeddingRequest{
+			body: &upstream.EmbeddingRequest{
 				Input: "Hello, World!",
 				Model: "text-embedding-ada-002",
 			},
@@ -108,7 +111,7 @@ func TestHandleEmbeddings(t *testing.T) {
 			name:   "missing auth header",
 			method: "POST",
 			path:   "/v1/embeddings",
-			body: &EmbeddingRequest{
+			body: &upstream.EmbeddingRequest{
 				Input: "test",
 				Model: "text-embedding-ada-002",
 			},
@@ -118,7 +121,7 @@ func TestHandleEmbeddings(t *testing.T) {
 			name:   "invalid auth format",
 			method: "POST",
 			path:   "/v1/embeddings",
-			body: &EmbeddingRequest{
+			body: &upstream.EmbeddingRequest{
 				Input: "test",
 				Model: "text-embedding-ada-002",
 			},
@@ -129,7 +132,7 @@ func TestHandleEmbeddings(t *testing.T) {
 			name:   "invalid api key",
 			method: "POST",
 			path:   "/v1/embeddings",
-			body: &EmbeddingRequest{
+			body: &upstream.EmbeddingRequest{
 				Input: "test",
 				Model: "text-embedding-ada-002",
 			},
@@ -140,7 +143,7 @@ func TestHandleEmbeddings(t *testing.T) {
 			name:   "invalid model",
 			method: "POST",
 			path:   "/v1/embeddings",
-			body: &EmbeddingRequest{
+			body: &upstream.EmbeddingRequest{
 				Input: "test",
 				Model: "invalid-model",
 			},
@@ -151,7 +154,7 @@ func TestHandleEmbeddings(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler := newHandler(allowedModels, apiKeyPattern, ts.URL, db)
+			handler := NewHandler(allowedModels, apiKeyPattern, ts.URL, db)
 
 			var body []byte
 			if tt.body != nil {
@@ -176,7 +179,7 @@ func TestHandleEmbeddings(t *testing.T) {
 			}
 
 			if tt.wantStatus == http.StatusOK {
-				var resp EmbeddingResponse
+				var resp upstream.EmbeddingResponse
 				if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 					t.Fatalf("Failed to decode response: %v", err)
 				}

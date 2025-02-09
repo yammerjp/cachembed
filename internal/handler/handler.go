@@ -1,4 +1,4 @@
-package main
+package handler
 
 import (
 	"context"
@@ -16,47 +16,19 @@ import (
 	"encoding/hex"
 
 	"github.com/google/uuid"
+	"github.com/yammerjp/cachembed/internal/storage"
+	"github.com/yammerjp/cachembed/internal/upstream"
 )
 
-type EmbeddingRequest struct {
-	Input          string `json:"input"`
-	Model          string `json:"model"`
-	EncodingFormat string `json:"encoding_format,omitempty"`
-	Dimensions     *int   `json:"dimensions,omitempty"`
-	User           string `json:"user,omitempty"`
-}
-
-type ErrorResponse struct {
-	Error struct {
-		Message string `json:"message"`
-		Type    string `json:"type"`
-		Code    string `json:"code"`
-	} `json:"error"`
-}
-
-type EmbeddingResponse struct {
-	Object string `json:"object"`
-	Data   []struct {
-		Object    string    `json:"object"`
-		Embedding []float32 `json:"embedding"`
-		Index     int       `json:"index"`
-	} `json:"data"`
-	Model string `json:"model"`
-	Usage struct {
-		PromptTokens int `json:"prompt_tokens"`
-		TotalTokens  int `json:"total_tokens"`
-	} `json:"usage"`
-}
-
-type handler struct {
+type Handler struct {
 	allowedModels []string
 	apiKeyPattern string
 	apiKeyRegexp  *regexp.Regexp
-	upstream      *upstreamClient
-	db            *DB
+	upstream      *upstream.Client
+	db            *storage.DB
 }
 
-func newHandler(allowedModels []string, apiKeyPattern string, upstreamURL string, db *DB) http.Handler {
+func NewHandler(allowedModels []string, apiKeyPattern string, upstreamURL string, db *storage.DB) http.Handler {
 	var re *regexp.Regexp
 	if apiKeyPattern != "" {
 		var err error
@@ -66,17 +38,17 @@ func newHandler(allowedModels []string, apiKeyPattern string, upstreamURL string
 			os.Exit(1)
 		}
 	}
-	return &handler{
+	return &Handler{
 		allowedModels: allowedModels,
 		apiKeyPattern: apiKeyPattern,
 		apiKeyRegexp:  re,
-		upstream:      newUpstreamClient(upstreamURL),
+		upstream:      upstream.NewClient(upstreamURL),
 		db:            db,
 	}
 }
 
 func writeError(w http.ResponseWriter, status int, message, errType string) {
-	var resp ErrorResponse
+	var resp upstream.ErrorResponse
 	resp.Error.Message = message
 	resp.Error.Type = errType
 	resp.Error.Code = http.StatusText(status)
@@ -86,7 +58,7 @@ func writeError(w http.ResponseWriter, status int, message, errType string) {
 	json.NewEncoder(w).Encode(resp)
 }
 
-func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	requestID := uuid.New().String()
 	ctx := r.Context()
 	ctx = context.WithValue(ctx, "request_id", requestID)
@@ -144,7 +116,7 @@ type requestResult struct {
 	totalTokens  int
 }
 
-func (h *handler) handleRequest(w http.ResponseWriter, r *http.Request, result *requestResult) error {
+func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request, result *requestResult) error {
 	if r.URL.Path != "/v1/embeddings" {
 		result.status = http.StatusNotFound
 		result.err = fmt.Errorf("not found")
@@ -183,7 +155,7 @@ func (h *handler) handleRequest(w http.ResponseWriter, r *http.Request, result *
 		return result.err
 	}
 
-	var req EmbeddingRequest
+	var req upstream.EmbeddingRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		result.status = http.StatusBadRequest
 		result.err = fmt.Errorf("invalid json: %w", err)
@@ -232,7 +204,7 @@ func (h *handler) handleRequest(w http.ResponseWriter, r *http.Request, result *
 			"last_accessed", cache.LastAccessed,
 		)
 
-		resp := EmbeddingResponse{
+		resp := upstream.EmbeddingResponse{
 			Object: "list",
 			Data: []struct {
 				Object    string    `json:"object"`
@@ -262,14 +234,14 @@ func (h *handler) handleRequest(w http.ResponseWriter, r *http.Request, result *
 	}
 
 	// キャッシュミス：upstreamにリクエスト
-	resp, err := h.upstream.createEmbedding(&req, r.Header.Get("Authorization"))
+	resp, err := h.upstream.CreateEmbedding(&req, r.Header.Get("Authorization"))
 	if err != nil {
-		if ue, ok := err.(*upstreamError); ok {
-			result.status = ue.statusCode
+		if ue, ok := err.(*upstream.UpstreamError); ok {
+			result.status = ue.StatusCode
 			result.err = fmt.Errorf("upstream error: %w", err)
 			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(ue.statusCode)
-			json.NewEncoder(w).Encode(ue.response)
+			w.WriteHeader(ue.StatusCode)
+			json.NewEncoder(w).Encode(ue.Response)
 			return result.err
 		}
 		result.status = http.StatusBadGateway

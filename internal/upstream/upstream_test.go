@@ -1,4 +1,4 @@
-package main
+package upstream
 
 import (
 	"encoding/json"
@@ -93,20 +93,20 @@ func TestCreateEmbedding(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client := newUpstreamClient(ts.URL)
-			resp, err := client.createEmbedding(tt.request, tt.authHeader)
+			client := NewClient(ts.URL)
+			resp, err := client.CreateEmbedding(tt.request, tt.authHeader)
 
 			if tt.wantError {
 				if err == nil {
 					t.Error("Expected error but got none")
 					return
 				}
-				if ue, ok := err.(*upstreamError); ok {
-					if ue.statusCode != tt.wantStatusCode {
-						t.Errorf("Wrong status code: got %v want %v", ue.statusCode, tt.wantStatusCode)
+				if ue, ok := err.(*UpstreamError); ok {
+					if ue.StatusCode != tt.wantStatusCode {
+						t.Errorf("Wrong status code: got %v want %v", ue.StatusCode, tt.wantStatusCode)
 					}
-					if ue.response.Error.Type != tt.wantErrorType {
-						t.Errorf("Wrong error type: got %v want %v", ue.response.Error.Type, tt.wantErrorType)
+					if ue.Response.Error.Type != tt.wantErrorType {
+						t.Errorf("Wrong error type: got %v want %v", ue.Response.Error.Type, tt.wantErrorType)
 					}
 				} else {
 					t.Errorf("Expected upstreamError but got %T", err)

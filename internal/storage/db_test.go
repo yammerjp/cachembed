@@ -1,4 +1,4 @@
-package main
+package storage
 
 import (
 	"bytes"
@@ -125,7 +125,7 @@ func TestEmbeddingCacheOperations(t *testing.T) {
 	defer db.Close()
 
 	// マイグレーションを実行
-	if err := runMigrations(db.DB, SQLiteDialect{}); err != nil {
+	if err := RunMigrations(db.DB, SQLiteDialect{}); err != nil {
 		t.Fatalf("Failed to run migrations: %v", err)
 	}
 
@@ -904,4 +904,91 @@ func encodeEmbedding(embedding []float32) []byte {
 		panic(fmt.Sprintf("failed to encode embedding: %v", err))
 	}
 	return buf.Bytes()
+}
+
+func TestGetMaxID(t *testing.T) {
+	// PostgreSQL接続情報を環境変数から取得
+	postgresDSN := os.Getenv("TEST_POSTGRES_DSN")
+	if postgresDSN == "" {
+		postgresDSN = "postgres://postgres:postgres@localhost:5433/cachembed_test?sslmode=disable"
+	}
+
+	tests := []struct {
+		name string
+		dsn  string
+	}{
+		{
+			name: "SQLite",
+			dsn:  ":memory:",
+		},
+		{
+			name: "PostgreSQL",
+			dsn:  postgresDSN,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// データベース接続
+			db, err := NewDB(tt.dsn)
+			if err != nil {
+				t.Skipf("Skipping %s tests: %v", tt.name, err)
+				return
+			}
+			defer db.Close()
+
+			// テーブルをクリーンアップ
+			_, err = db.Exec(db.dialect.ConvertPlaceholders("DELETE FROM embeddings"))
+			if err != nil {
+				t.Fatalf("Failed to cleanup table: %v", err)
+			}
+
+			// 空のテーブルでのテスト
+			t.Run("empty table", func(t *testing.T) {
+				maxID, err := db.GetMaxID()
+				if err != nil {
+					t.Fatalf("GetMaxID failed: %v", err)
+				}
+				if maxID != 0 {
+					t.Errorf("Expected maxID = 0 for empty table, got %d", maxID)
+				}
+			})
+
+			// テストデータを挿入
+			embedding := []float32{0.1, 0.2, 0.3}
+			for i := 0; i < 5; i++ {
+				hash := fmt.Sprintf("hash%d", i)
+				if err := db.StoreEmbedding(hash, "test-model", embedding); err != nil {
+					t.Fatalf("Failed to store embedding: %v", err)
+				}
+			}
+
+			// データ挿入後のテスト
+			t.Run("with data", func(t *testing.T) {
+				maxID, err := db.GetMaxID()
+				if err != nil {
+					t.Fatalf("GetMaxID failed: %v", err)
+				}
+				if maxID <= 0 {
+					t.Errorf("Expected maxID > 0, got %d", maxID)
+				}
+			})
+
+			// すべてのデータを削除してのテスト
+			_, err = db.Exec(db.dialect.ConvertPlaceholders("DELETE FROM embeddings"))
+			if err != nil {
+				t.Fatalf("Failed to cleanup table: %v", err)
+			}
+
+			t.Run("after deletion", func(t *testing.T) {
+				maxID, err := db.GetMaxID()
+				if err != nil {
+					t.Fatalf("GetMaxID failed: %v", err)
+				}
+				if maxID != 0 {
+					t.Errorf("Expected maxID = 0 after deletion, got %d", maxID)
+				}
+			})
+		})
+	}
 }
