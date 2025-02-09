@@ -10,6 +10,34 @@ import (
 )
 
 func TestHandleEmbeddings(t *testing.T) {
+	// モックサーバーの設定（シンプルな成功レスポンスのみ）
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := EmbeddingResponse{
+			Object: "list",
+			Data: []struct {
+				Object    string    `json:"object"`
+				Embedding []float32 `json:"embedding"`
+				Index     int       `json:"index"`
+			}{
+				{
+					Object:    "embedding",
+					Embedding: []float32{0.1, 0.2, 0.3},
+					Index:     0,
+				},
+			},
+			Model: "text-embedding-ada-002",
+			Usage: struct {
+				PromptTokens int `json:"prompt_tokens"`
+				TotalTokens  int `json:"total_tokens"`
+			}{
+				PromptTokens: 8,
+				TotalTokens:  8,
+			},
+		}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer ts.Close()
+
 	dimensions := 1536
 	allowedModels := []string{"text-embedding-ada-002"}
 	apiKeyPattern := "^sk-[a-zA-Z0-9]{32}$"
@@ -204,7 +232,7 @@ func TestHandleEmbeddings(t *testing.T) {
 			}
 
 			rr := httptest.NewRecorder()
-			handler := newHandler(allowedModels, apiKeyPattern)
+			handler := newHandler(allowedModels, apiKeyPattern, ts.URL)
 			handler.ServeHTTP(rr, req)
 
 			if status := rr.Code; status != tt.wantStatus {

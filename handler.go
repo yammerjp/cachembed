@@ -26,13 +26,28 @@ type ErrorResponse struct {
 	} `json:"error"`
 }
 
+type EmbeddingResponse struct {
+	Object string `json:"object"`
+	Data   []struct {
+		Object    string    `json:"object"`
+		Embedding []float32 `json:"embedding"`
+		Index     int       `json:"index"`
+	} `json:"data"`
+	Model string `json:"model"`
+	Usage struct {
+		PromptTokens int `json:"prompt_tokens"`
+		TotalTokens  int `json:"total_tokens"`
+	} `json:"usage"`
+}
+
 type handler struct {
 	allowedModels []string
 	apiKeyPattern string
 	apiKeyRegexp  *regexp.Regexp
+	upstream      *upstreamClient
 }
 
-func newHandler(allowedModels []string, apiKeyPattern string) http.Handler {
+func newHandler(allowedModels []string, apiKeyPattern string, upstreamURL string) http.Handler {
 	var re *regexp.Regexp
 	if apiKeyPattern != "" {
 		var err error
@@ -46,6 +61,7 @@ func newHandler(allowedModels []string, apiKeyPattern string) http.Handler {
 		allowedModels: allowedModels,
 		apiKeyPattern: apiKeyPattern,
 		apiKeyRegexp:  re,
+		upstream:      newUpstreamClient(upstreamURL),
 	}
 }
 
@@ -110,5 +126,23 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// OpenAI APIにリクエストを送信
+	resp, err := h.upstream.createEmbedding(&req, r.Header.Get("Authorization"))
+	if err != nil {
+		if ue, ok := err.(*upstreamError); ok {
+			// アップストリームからのエラーレスポンスをそのまま転送
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(ue.statusCode)
+			json.NewEncoder(w).Encode(ue.response)
+			return
+		}
+		// その他のエラー
+		writeError(w, http.StatusBadGateway, "Failed to reach upstream API: "+err.Error(), "upstream_error")
+		return
+	}
+
+	// レスポンスを返す
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(resp)
 }

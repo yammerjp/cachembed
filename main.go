@@ -74,7 +74,7 @@ func startServer(cmd ServeCmd) {
 	fmt.Printf("Upstream API: %s\n", cmd.UpstreamURL)
 	fmt.Printf("Allowed models: %v\n", cmd.AllowedModels)
 
-	handler := newHandler(cmd.AllowedModels, cmd.APIKeyPattern)
+	handler := newHandler(cmd.AllowedModels, cmd.APIKeyPattern, cmd.UpstreamURL)
 
 	addr := fmt.Sprintf("%s:%d", cmd.Host, cmd.Port)
 	if err := http.ListenAndServe(addr, handler); err != nil {
