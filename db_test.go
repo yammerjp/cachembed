@@ -603,6 +603,12 @@ func TestDeleteEntriesBeforeWithSleep(t *testing.T) {
 }
 
 func TestDatabaseOperations(t *testing.T) {
+	// PostgreSQL接続情報を環境変数から取得
+	postgresDSN := os.Getenv("TEST_POSTGRES_DSN")
+	if postgresDSN == "" {
+		postgresDSN = "postgres://postgres:postgres@localhost:5433/cachembed_test?sslmode=disable"
+	}
+
 	tests := []struct {
 		name string
 		dsn  string
@@ -613,7 +619,7 @@ func TestDatabaseOperations(t *testing.T) {
 		},
 		{
 			name: "PostgreSQL",
-			dsn:  "postgres://postgres:postgres@localhost:5433/cachembed_test?sslmode=disable",
+			dsn:  postgresDSN,
 		},
 	}
 
