@@ -7,22 +7,47 @@ import (
 )
 
 func TestHandleEmbeddings(t *testing.T) {
-	// Create a request to pass to our handler
-	req, err := http.NewRequest("POST", "/v1/embeddings", nil)
-	if err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		name       string
+		method     string
+		path       string
+		wantStatus int
+	}{
+		{
+			name:       "POST to correct path returns 200",
+			method:     http.MethodPost,
+			path:       "/v1/embeddings",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "GET to correct path returns 405",
+			method:     http.MethodGet,
+			path:       "/v1/embeddings",
+			wantStatus: http.StatusMethodNotAllowed,
+		},
+		{
+			name:       "wrong path returns 404",
+			method:     http.MethodPost,
+			path:       "/wrong/path",
+			wantStatus: http.StatusNotFound,
+		},
 	}
 
-	// Create a ResponseRecorder to record the response
-	rr := httptest.NewRecorder()
-	handler := http.HandlerFunc(handleEmbeddings)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, err := http.NewRequest(tt.method, tt.path, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
 
-	// Call the handler directly with the request and response recorder
-	handler.ServeHTTP(rr, req)
+			rr := httptest.NewRecorder()
+			handler := http.HandlerFunc(handleEmbeddings)
+			handler.ServeHTTP(rr, req)
 
-	// Check the status code
-	if status := rr.Code; status != http.StatusOK {
-		t.Errorf("handler returned wrong status code: got %v want %v",
-			status, http.StatusOK)
+			if status := rr.Code; status != tt.wantStatus {
+				t.Errorf("handler returned wrong status code: got %v want %v",
+					status, tt.wantStatus)
+			}
+		})
 	}
 }
