@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"net/http"
 	"os"
 
 	"github.com/alecthomas/kong"
@@ -69,7 +70,14 @@ func main() {
 func startServer(cmd ServeCmd) {
 	fmt.Printf("Starting server on %s:%d using database: %s\n", cmd.Host, cmd.Port, cmd.DSN)
 	fmt.Printf("Upstream API: %s\n", cmd.UpstreamURL)
-	os.Exit(1)
+
+	handler := http.HandlerFunc(handleEmbeddings)
+
+	addr := fmt.Sprintf("%s:%d", cmd.Host, cmd.Port)
+	if err := http.ListenAndServe(addr, handler); err != nil {
+		slog.Error("Server failed to start", "error", err)
+		os.Exit(1)
+	}
 }
 
 func runGarbageCollection(cmd GCCmd) {
