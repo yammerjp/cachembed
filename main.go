@@ -70,21 +70,25 @@ func main() {
 }
 
 func startServer(cmd ServeCmd) {
-	fmt.Printf("Starting server on %s:%d using database: %s\n", cmd.Host, cmd.Port, cmd.DSN)
-	fmt.Printf("Upstream API: %s\n", cmd.UpstreamURL)
-	fmt.Printf("Allowed models: %v\n", cmd.AllowedModels)
+	slog.Info("starting server",
+		"host", cmd.Host,
+		"port", cmd.Port,
+		"database", cmd.DSN,
+		"upstream_api", cmd.UpstreamURL,
+		"allowed_models", cmd.AllowedModels,
+	)
 
 	handler := newHandler(cmd.AllowedModels, cmd.APIKeyPattern, cmd.UpstreamURL)
 
 	addr := fmt.Sprintf("%s:%d", cmd.Host, cmd.Port)
 	if err := http.ListenAndServe(addr, handler); err != nil {
-		slog.Error("Server failed to start", "error", err)
+		slog.Error("server failed to start", "error", err)
 		os.Exit(1)
 	}
 }
 
 func runGarbageCollection(cmd GCCmd) {
-	fmt.Printf("Running garbage collection, removing %d least recently used items\n", cmd.GCLimit)
+	slog.Info("running garbage collection", "gc_limit", cmd.GCLimit)
 	// TODO: Implement GC logic
 	os.Exit(1)
 }
