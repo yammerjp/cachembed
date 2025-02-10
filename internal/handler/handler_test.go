@@ -69,22 +69,95 @@ func TestHandleEmbeddings(t *testing.T) {
 	validAPIKey := "sk-abcdefghijklmnopqrstuvwxyz123456" // 有効なAPIキーの例
 
 	tests := []struct {
-		name         string
-		method       string
-		path         string
-		body         *upstream.EmbeddingRequest
-		authHeader   string
-		wantStatus   int
-		wantCacheHit bool // キャッシュヒットを期待するかどうか
-		wantTokens   int  // 期待されるトークン数（キャッシュヒット時は0）
+		name          string
+		request       map[string]interface{}
+		authHeader    string
+		wantStatus    int
+		wantCacheHit  bool
+		wantTokens    int
+		wantErrorType string
 	}{
 		{
-			name:   "valid request - initial (cache miss)",
-			method: "POST",
-			path:   "/v1/embeddings",
-			body: &upstream.EmbeddingRequest{
-				Input: "Hello, World!",
-				Model: "text-embedding-ada-002",
+			name: "valid string input",
+			request: map[string]interface{}{
+				"input": "The food was delicious",
+				"model": "text-embedding-ada-002",
+			},
+			authHeader:   "Bearer " + validAPIKey,
+			wantStatus:   http.StatusOK,
+			wantTokens:   8,
+			wantCacheHit: false,
+		},
+		{
+			name: "valid string input (cache hit)",
+			request: map[string]interface{}{
+				"input": "The food was delicious",
+				"model": "text-embedding-ada-002",
+			},
+			authHeader:   "Bearer " + validAPIKey,
+			wantStatus:   http.StatusOK,
+			wantCacheHit: true,
+			wantTokens:   0,
+		},
+		{
+			name: "valid integer array input",
+			request: map[string]interface{}{
+				"input": []int{1, 2, 3, 4},
+				"model": "text-embedding-ada-002",
+			},
+			authHeader:   "Bearer " + validAPIKey,
+			wantStatus:   http.StatusOK,
+			wantTokens:   8,
+			wantCacheHit: false,
+		},
+		{
+			name: "valid integer array input (cache hit)",
+			request: map[string]interface{}{
+				"input": []int{1, 2, 3, 4},
+				"model": "text-embedding-ada-002",
+			},
+			authHeader:   "Bearer " + validAPIKey,
+			wantStatus:   http.StatusOK,
+			wantCacheHit: true,
+			wantTokens:   0,
+		},
+		{
+			name: "valid float array input",
+			request: map[string]interface{}{
+				"input": []float64{1.5, 2.5, 3.5, 4.5},
+				"model": "text-embedding-ada-002",
+			},
+			authHeader:   "Bearer " + validAPIKey,
+			wantStatus:   http.StatusOK,
+			wantTokens:   8,
+			wantCacheHit: false,
+		},
+		{
+			name: "valid float array input (cache hit)",
+			request: map[string]interface{}{
+				"input": []float64{1.5, 2.5, 3.5, 4.5},
+				"model": "text-embedding-ada-002",
+			},
+			authHeader:   "Bearer " + validAPIKey,
+			wantStatus:   http.StatusOK,
+			wantCacheHit: true,
+			wantTokens:   0,
+		},
+		{
+			name: "invalid array element type",
+			request: map[string]interface{}{
+				"input": []interface{}{"string", 1, 2.0},
+				"model": "text-embedding-ada-002",
+			},
+			authHeader:    "Bearer " + validAPIKey,
+			wantStatus:    http.StatusBadRequest,
+			wantErrorType: "invalid_request_error",
+		},
+		{
+			name: "valid request - initial (cache miss)",
+			request: map[string]interface{}{
+				"input": "Hello, World!",
+				"model": "text-embedding-ada-002",
 			},
 			authHeader:   "Bearer " + validAPIKey,
 			wantStatus:   http.StatusOK,
@@ -92,12 +165,10 @@ func TestHandleEmbeddings(t *testing.T) {
 			wantTokens:   8,
 		},
 		{
-			name:   "valid request - cached (cache hit)",
-			method: "POST",
-			path:   "/v1/embeddings",
-			body: &upstream.EmbeddingRequest{
-				Input: "Hello, World!",
-				Model: "text-embedding-ada-002",
+			name: "valid request - cached (cache hit)",
+			request: map[string]interface{}{
+				"input": "Hello, World!",
+				"model": "text-embedding-ada-002",
 			},
 			authHeader:   "Bearer " + validAPIKey,
 			wantStatus:   http.StatusOK,
@@ -106,58 +177,52 @@ func TestHandleEmbeddings(t *testing.T) {
 		},
 		{
 			name:       "invalid method",
-			method:     "GET",
-			path:       "/v1/embeddings",
+			request:    map[string]interface{}{},
 			wantStatus: http.StatusMethodNotAllowed,
 		},
 		{
 			name:       "invalid path",
-			method:     "POST",
-			path:       "/v1/invalid",
+			request:    map[string]interface{}{},
 			wantStatus: http.StatusNotFound,
 		},
 		{
-			name:   "missing auth header",
-			method: "POST",
-			path:   "/v1/embeddings",
-			body: &upstream.EmbeddingRequest{
-				Input: "test",
-				Model: "text-embedding-ada-002",
+			name: "missing auth header",
+			request: map[string]interface{}{
+				"input": "test",
+				"model": "text-embedding-ada-002",
 			},
-			wantStatus: http.StatusUnauthorized,
+			wantStatus:    http.StatusUnauthorized,
+			wantErrorType: "invalid_request_error",
 		},
 		{
-			name:   "invalid auth format",
-			method: "POST",
-			path:   "/v1/embeddings",
-			body: &upstream.EmbeddingRequest{
-				Input: "test",
-				Model: "text-embedding-ada-002",
+			name: "invalid auth format",
+			request: map[string]interface{}{
+				"input": "test",
+				"model": "text-embedding-ada-002",
 			},
-			authHeader: "Invalid " + validAPIKey,
-			wantStatus: http.StatusUnauthorized,
+			authHeader:    "Invalid " + validAPIKey,
+			wantStatus:    http.StatusUnauthorized,
+			wantErrorType: "invalid_request_error",
 		},
 		{
-			name:   "invalid api key",
-			method: "POST",
-			path:   "/v1/embeddings",
-			body: &upstream.EmbeddingRequest{
-				Input: "test",
-				Model: "text-embedding-ada-002",
+			name: "invalid api key",
+			request: map[string]interface{}{
+				"input": "test",
+				"model": "text-embedding-ada-002",
 			},
-			authHeader: "Bearer invalid-key",
-			wantStatus: http.StatusUnauthorized,
+			authHeader:    "Bearer invalid-key",
+			wantStatus:    http.StatusUnauthorized,
+			wantErrorType: "invalid_request_error",
 		},
 		{
-			name:   "invalid model",
-			method: "POST",
-			path:   "/v1/embeddings",
-			body: &upstream.EmbeddingRequest{
-				Input: "test",
-				Model: "invalid-model",
+			name: "invalid model",
+			request: map[string]interface{}{
+				"input": "test",
+				"model": "invalid-model",
 			},
-			authHeader: "Bearer " + validAPIKey,
-			wantStatus: http.StatusBadRequest,
+			authHeader:    "Bearer " + validAPIKey,
+			wantStatus:    http.StatusBadRequest,
+			wantErrorType: "invalid_request_error",
 		},
 	}
 
@@ -166,15 +231,22 @@ func TestHandleEmbeddings(t *testing.T) {
 			handler := NewHandler(allowedModels, apiKeyPattern, ts.URL, db, false)
 
 			var body []byte
-			if tt.body != nil {
-				var err error
-				body, err = json.Marshal(tt.body)
-				if err != nil {
-					t.Fatalf("Failed to marshal request body: %v", err)
-				}
+			var err error
+			body, err = json.Marshal(tt.request)
+			if err != nil {
+				t.Fatalf("Failed to marshal request body: %v", err)
 			}
 
-			req := httptest.NewRequest(tt.method, tt.path, bytes.NewReader(body))
+			method := "POST"
+			path := "/v1/embeddings"
+			if tt.name == "invalid method" {
+				method = "GET"
+			}
+			if tt.name == "invalid path" {
+				path = "/v1/invalid"
+			}
+
+			req := httptest.NewRequest(method, path, bytes.NewReader(body))
 			if tt.authHeader != "" {
 				req.Header.Set("Authorization", tt.authHeader)
 			}

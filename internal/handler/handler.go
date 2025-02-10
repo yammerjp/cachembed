@@ -181,12 +181,52 @@ func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request, result *
 		return result.err
 	}
 
-	if req.Input == "" || req.Model == "" {
+	if req.Input == nil || req.Model == "" {
 		result.status = http.StatusBadRequest
 		result.err = fmt.Errorf("missing required fields")
 		writeError(w, result.status, "Missing required fields: 'input' and 'model' must not be empty", "invalid_request_error")
 		return result.err
 	}
+
+	// 入力の型チェックと変換
+	var inputStr string
+	switch v := req.Input.(type) {
+	case string:
+		if v == "" {
+			result.status = http.StatusBadRequest
+			result.err = fmt.Errorf("empty input string")
+			writeError(w, result.status, "Input string must not be empty", "invalid_request_error")
+			return result.err
+		}
+		inputStr = v
+	case []interface{}:
+		// 数値配列を文字列に変換
+		var numbers []string
+		for _, num := range v {
+			switch n := num.(type) {
+			case float64:
+				// 浮動小数点数の場合は、精度を保持するために元の値を文字列化
+				numbers = append(numbers, fmt.Sprintf("%g", n))
+			case int:
+				numbers = append(numbers, fmt.Sprintf("%d", n))
+			default:
+				result.status = http.StatusBadRequest
+				result.err = fmt.Errorf("invalid input array element type")
+				writeError(w, result.status, "Input array must contain only numbers", "invalid_request_error")
+				return result.err
+			}
+		}
+		inputStr = strings.Join(numbers, ",")
+	default:
+		result.status = http.StatusBadRequest
+		result.err = fmt.Errorf("invalid input type")
+		writeError(w, result.status, "Input must be either a string or an array of numbers", "invalid_request_error")
+		return result.err
+	}
+
+	// 入力のハッシュを計算（文字列化した入力を使用）
+	inputHash := sha1.Sum([]byte(inputStr))
+	inputHashStr := hex.EncodeToString(inputHash[:])
 
 	if !slices.Contains(h.allowedModels, req.Model) {
 		result.status = http.StatusBadRequest
@@ -201,10 +241,6 @@ func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request, result *
 		writeError(w, result.status, "Invalid encoding_format: must be either 'float' or 'base64'", "invalid_request_error")
 		return result.err
 	}
-
-	// 入力のハッシュを計算
-	inputHash := sha1.Sum([]byte(req.Input))
-	inputHashStr := hex.EncodeToString(inputHash[:])
 
 	// キャッシュをチェック
 	if cache, err := h.db.GetEmbedding(inputHashStr, req.Model); err != nil {

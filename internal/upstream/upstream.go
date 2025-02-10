@@ -9,11 +9,11 @@ import (
 )
 
 type EmbeddingRequest struct {
-	Input          string `json:"input"`
-	Model          string `json:"model"`
-	EncodingFormat string `json:"encoding_format,omitempty"`
-	Dimensions     *int   `json:"dimensions,omitempty"`
-	User           string `json:"user,omitempty"`
+	Input          interface{} `json:"input"`
+	Model          string      `json:"model"`
+	EncodingFormat string      `json:"encoding_format,omitempty"`
+	Dimensions     *int        `json:"dimensions,omitempty"`
+	User           string      `json:"user,omitempty"`
 }
 
 type ErrorResponse struct {
