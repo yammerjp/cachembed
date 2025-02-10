@@ -3,13 +3,11 @@ package handler
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"log/slog"
-	"math"
 	"net/http"
 	"os"
 	"regexp"
@@ -51,17 +49,6 @@ func NewHandler(allowedModels []string, apiKeyPattern string, upstreamURL string
 		db:            db,
 		debugBody:     debugBody,
 	}
-}
-
-func writeError(w http.ResponseWriter, status int, message, errType string) {
-	var resp upstream.ErrorResponse
-	resp.Error.Message = message
-	resp.Error.Type = errType
-	resp.Error.Code = http.StatusText(status)
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(resp)
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -123,7 +110,6 @@ type requestResult struct {
 }
 
 func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request, result *requestResult) error {
-	// debug payload
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		result.status = http.StatusBadRequest
@@ -135,42 +121,8 @@ func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request, result *
 		slog.Debug("request payload", "payload", string(body))
 	}
 
-	if r.URL.Path != "/v1/embeddings" {
-		result.status = http.StatusNotFound
-		result.err = fmt.Errorf("not found")
-		writeError(w, result.status, "Not found", "invalid_request_error")
-		return result.err
-	}
-
-	if r.Method != http.MethodPost {
-		result.status = http.StatusMethodNotAllowed
-		result.err = fmt.Errorf("method not allowed: %s", r.Method)
-		writeError(w, result.status, "Method not allowed. Please use POST.", "invalid_request_error")
-		return result.err
-	}
-
-	// Check Authorization header
-	authHeader := r.Header.Get("Authorization")
-	if !strings.HasPrefix(authHeader, "Bearer ") {
-		result.status = http.StatusUnauthorized
-		result.err = fmt.Errorf("invalid auth header format")
-		writeError(w, result.status, "Missing or invalid Authorization header. Expected format: 'Bearer YOUR-API-KEY'", "invalid_request_error")
-		return result.err
-	}
-
-	token := strings.TrimPrefix(authHeader, "Bearer ")
-	if token == "" {
-		result.status = http.StatusUnauthorized
-		result.err = fmt.Errorf("empty api key")
-		writeError(w, result.status, "API key is required", "invalid_request_error")
-		return result.err
-	}
-
-	if h.apiKeyRegexp != nil && !h.apiKeyRegexp.MatchString(token) {
-		result.status = http.StatusUnauthorized
-		result.err = fmt.Errorf("invalid api key format")
-		writeError(w, result.status, "Invalid API key format", "invalid_request_error")
-		return result.err
+	if err := h.validateRequest(r, result, w); err != nil {
+		return err
 	}
 
 	var req upstream.EmbeddingRequest
@@ -181,66 +133,21 @@ func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request, result *
 		return result.err
 	}
 
-	if req.Input == nil || req.Model == "" {
-		result.status = http.StatusBadRequest
-		result.err = fmt.Errorf("missing required fields")
-		writeError(w, result.status, "Missing required fields: 'input' and 'model' must not be empty", "invalid_request_error")
-		return result.err
+	if err := h.validateEmbeddingRequest(&req, result, w); err != nil {
+		return err
 	}
 
-	// 入力の型チェックと変換
-	var inputStr string
-	switch v := req.Input.(type) {
-	case string:
-		if v == "" {
-			result.status = http.StatusBadRequest
-			result.err = fmt.Errorf("empty input string")
-			writeError(w, result.status, "Input string must not be empty", "invalid_request_error")
-			return result.err
-		}
-		inputStr = v
-	case []interface{}:
-		// 数値配列を文字列に変換
-		var numbers []string
-		for _, num := range v {
-			switch n := num.(type) {
-			case float64:
-				// 浮動小数点数の場合は、精度を保持するために元の値を文字列化
-				numbers = append(numbers, fmt.Sprintf("%g", n))
-			case int:
-				numbers = append(numbers, fmt.Sprintf("%d", n))
-			default:
-				result.status = http.StatusBadRequest
-				result.err = fmt.Errorf("invalid input array element type")
-				writeError(w, result.status, "Input array must contain only numbers", "invalid_request_error")
-				return result.err
-			}
-		}
-		inputStr = strings.Join(numbers, ",")
-	default:
+	inputStr, err := processInput(req.Input)
+	if err != nil {
 		result.status = http.StatusBadRequest
-		result.err = fmt.Errorf("invalid input type")
-		writeError(w, result.status, "Input must be either a string or an array of numbers", "invalid_request_error")
+		result.err = fmt.Errorf("invalid input: %w", err)
+		writeError(w, result.status, err.Error(), "invalid_request_error")
 		return result.err
 	}
 
 	// 入力のハッシュを計算（文字列化した入力を使用）
 	inputHash := sha1.Sum([]byte(inputStr))
 	inputHashStr := hex.EncodeToString(inputHash[:])
-
-	if !slices.Contains(h.allowedModels, req.Model) {
-		result.status = http.StatusBadRequest
-		result.err = fmt.Errorf("unsupported model: %s", req.Model)
-		writeError(w, result.status, "Unsupported model: "+req.Model, "invalid_request_error")
-		return result.err
-	}
-
-	if req.EncodingFormat != "" && req.EncodingFormat != "float" && req.EncodingFormat != "base64" {
-		result.status = http.StatusBadRequest
-		result.err = fmt.Errorf("invalid encoding format: %s", req.EncodingFormat)
-		writeError(w, result.status, "Invalid encoding_format: must be either 'float' or 'base64'", "invalid_request_error")
-		return result.err
-	}
 
 	// キャッシュをチェック
 	if cache, err := h.db.GetEmbedding(inputHashStr, req.Model); err != nil {
@@ -340,64 +247,69 @@ func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request, result *
 	return json.NewEncoder(w).Encode(resp)
 }
 
-func float32ToBase64(values []float32) string {
-	// Convert float32 to bytes
-	buf := new(bytes.Buffer)
-	for _, v := range values {
-		bits := math.Float32bits(v)
-		buf.Write([]byte{byte(bits), byte(bits >> 8), byte(bits >> 16), byte(bits >> 24)})
+func (h *Handler) validateRequest(r *http.Request, result *requestResult, w http.ResponseWriter) error {
+	if r.URL.Path != "/v1/embeddings" {
+		result.status = http.StatusNotFound
+		result.err = fmt.Errorf("not found")
+		writeError(w, result.status, "Not found", "invalid_request_error")
+		return fmt.Errorf("not found")
 	}
 
-	// Encode to base64
-	return base64.StdEncoding.EncodeToString(buf.Bytes())
+	if r.Method != http.MethodPost {
+		result.status = http.StatusMethodNotAllowed
+		result.err = fmt.Errorf("method not allowed: %s", r.Method)
+		writeError(w, result.status, "Method not allowed. Please use POST.", "invalid_request_error")
+		return fmt.Errorf("method not allowed: %s", r.Method)
+	}
+
+	// Authorization headerのチェック
+	authHeader := r.Header.Get("Authorization")
+	if !strings.HasPrefix(authHeader, "Bearer ") {
+		result.status = http.StatusUnauthorized
+		result.err = fmt.Errorf("invalid auth header format")
+		writeError(w, result.status, "Missing or invalid Authorization header. Expected format: 'Bearer YOUR-API-KEY'", "invalid_request_error")
+		return fmt.Errorf("invalid auth header format")
+	}
+
+	token := strings.TrimPrefix(authHeader, "Bearer ")
+	if token == "" {
+		result.status = http.StatusUnauthorized
+		result.err = fmt.Errorf("empty api key")
+		writeError(w, result.status, "API key is required", "invalid_request_error")
+		return fmt.Errorf("empty api key")
+	}
+
+	if h.apiKeyRegexp != nil && !h.apiKeyRegexp.MatchString(token) {
+		result.status = http.StatusUnauthorized
+		result.err = fmt.Errorf("invalid api key format")
+		writeError(w, result.status, "Invalid API key format", "invalid_request_error")
+		return fmt.Errorf("invalid api key format")
+	}
+
+	return nil
 }
 
-func formatEmbedding(embedding []float32, format string) interface{} {
-	if format == "base64" {
-		return float32ToBase64(embedding)
+func (h *Handler) validateEmbeddingRequest(req *upstream.EmbeddingRequest, result *requestResult, w http.ResponseWriter) error {
+	if req.Input == nil || req.Model == "" {
+		result.status = http.StatusBadRequest
+		result.err = fmt.Errorf("missing required fields")
+		writeError(w, result.status, "Missing required fields: 'input' and 'model' must not be empty", "invalid_request_error")
+		return result.err
 	}
-	return embedding
-}
 
-func convertToFloat32Slice(v interface{}) ([]float32, bool) {
-	slog.Debug("converting embedding",
-		"type", fmt.Sprintf("%T", v),
-		"value", fmt.Sprintf("%v", v),
-	)
-
-	switch x := v.(type) {
-	case []float32:
-		slog.Debug("found float32 slice")
-		return x, true
-	case []float64:
-		slog.Debug("found float64 slice")
-		// Convert float64 slice to float32 slice
-		result := make([]float32, len(x))
-		for i, val := range x {
-			result[i] = float32(val)
-		}
-		return result, true
-	case []interface{}:
-		slog.Debug("found interface slice")
-		// Convert []interface{} to []float32
-		result := make([]float32, len(x))
-		for i, val := range x {
-			switch v := val.(type) {
-			case float64:
-				result[i] = float32(v)
-			case float32:
-				result[i] = v
-			default:
-				slog.Debug("invalid type in interface slice",
-					"index", i,
-					"type", fmt.Sprintf("%T", val),
-				)
-				return nil, false
-			}
-		}
-		return result, true
-	default:
-		slog.Debug("unknown type")
-		return nil, false
+	if !slices.Contains(h.allowedModels, req.Model) {
+		result.status = http.StatusBadRequest
+		result.err = fmt.Errorf("unsupported model: %s", req.Model)
+		writeError(w, result.status, "Unsupported model: "+req.Model, "invalid_request_error")
+		return result.err
 	}
+
+	if req.EncodingFormat != "" && req.EncodingFormat != "float" && req.EncodingFormat != "base64" {
+		result.status = http.StatusBadRequest
+		result.err = fmt.Errorf("invalid encoding format: %s", req.EncodingFormat)
+		writeError(w, result.status, "Invalid encoding_format: must be either 'float' or 'base64'", "invalid_request_error")
+		return result.err
+	}
+
+	return nil
 }
