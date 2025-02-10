@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -29,29 +30,37 @@ func TestHandleEmbeddings(t *testing.T) {
 
 	// モックサーバーの設定（シンプルな成功レスポンスのみ）
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		resp := upstream.EmbeddingResponse{
-			Object: "list",
-			Data: []struct {
-				Object    string    `json:"object"`
-				Embedding []float32 `json:"embedding"`
-				Index     int       `json:"index"`
-			}{
+		// デバッグ用にリクエストの内容を表示
+		slog.Debug("mock server received request",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"headers", r.Header,
+		)
+
+		// JSONとして正しい形式でレスポンスを構築
+		rawResp := map[string]interface{}{
+			"object": "list",
+			"data": []map[string]interface{}{
 				{
-					Object:    "embedding",
-					Embedding: []float32{0.1, 0.2, 0.3},
-					Index:     0,
+					"object":    "embedding",
+					"embedding": []float64{0.1, 0.2, 0.3}, // float64を使用
+					"index":     0,
 				},
 			},
-			Model: "text-embedding-ada-002",
-			Usage: struct {
-				PromptTokens int `json:"prompt_tokens"`
-				TotalTokens  int `json:"total_tokens"`
-			}{
-				PromptTokens: 8,
-				TotalTokens:  8,
+			"model": "text-embedding-ada-002",
+			"usage": map[string]interface{}{
+				"prompt_tokens": 8,
+				"total_tokens":  8,
 			},
 		}
-		json.NewEncoder(w).Encode(resp)
+		// デバッグ用にレスポンスの内容を表示
+		respBytes, _ := json.Marshal(rawResp)
+		slog.Debug("mock server sending response",
+			"response", string(respBytes),
+		)
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(rawResp)
 	}))
 	defer ts.Close()
 
@@ -195,9 +204,40 @@ func TestHandleEmbeddings(t *testing.T) {
 				// レスポンスの基本的な検証
 				if len(resp.Data) != 1 {
 					t.Errorf("Expected 1 embedding, got %d", len(resp.Data))
+					return
 				}
-				if len(resp.Data[0].Embedding) != 3 {
-					t.Errorf("Expected embedding length 3, got %d", len(resp.Data[0].Embedding))
+				// 型アサーションの前にnilチェック
+				if resp.Data[0].Embedding == nil {
+					t.Error("Embedding is nil")
+					return
+				}
+
+				// []interface{}として処理
+				switch embedding := resp.Data[0].Embedding.(type) {
+				case []interface{}:
+					if len(embedding) != 3 {
+						t.Errorf("Expected embedding length 3, got %d", len(embedding))
+						return
+					}
+					// 各要素が数値であることを確認
+					for i, v := range embedding {
+						switch v.(type) {
+						case float64, float32:
+							// OK
+						default:
+							t.Errorf("Expected float at index %d, got %T", i, v)
+						}
+					}
+				case []float64:
+					if len(embedding) != 3 {
+						t.Errorf("Expected embedding length 3, got %d", len(embedding))
+					}
+				case []float32:
+					if len(embedding) != 3 {
+						t.Errorf("Expected embedding length 3, got %d", len(embedding))
+					}
+				default:
+					t.Errorf("Expected embedding array, got %T", resp.Data[0].Embedding)
 				}
 			}
 		})

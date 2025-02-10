@@ -35,29 +35,22 @@ func TestCreateEmbedding(t *testing.T) {
 		}
 
 		// 正常系のレスポンス
-		resp := EmbeddingResponse{
-			Object: "list",
-			Data: []struct {
-				Object    string    `json:"object"`
-				Embedding []float32 `json:"embedding"`
-				Index     int       `json:"index"`
-			}{
+		rawResp := map[string]interface{}{
+			"object": "list",
+			"data": []map[string]interface{}{
 				{
-					Object:    "embedding",
-					Embedding: []float32{0.1, 0.2, 0.3},
-					Index:     0,
+					"object":    "embedding",
+					"embedding": []float64{0.1, 0.2, 0.3},
+					"index":     0,
 				},
 			},
-			Model: req.Model,
-			Usage: struct {
-				PromptTokens int `json:"prompt_tokens"`
-				TotalTokens  int `json:"total_tokens"`
-			}{
-				PromptTokens: 8,
-				TotalTokens:  8,
+			"model": req.Model,
+			"usage": map[string]interface{}{
+				"prompt_tokens": 8,
+				"total_tokens":  8,
 			},
 		}
-		json.NewEncoder(w).Encode(resp)
+		json.NewEncoder(w).Encode(rawResp)
 	}))
 	defer ts.Close()
 

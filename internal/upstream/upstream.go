@@ -27,9 +27,9 @@ type ErrorResponse struct {
 type EmbeddingResponse struct {
 	Object string `json:"object"`
 	Data   []struct {
-		Object    string    `json:"object"`
-		Embedding []float32 `json:"embedding"`
-		Index     int       `json:"index"`
+		Object    string      `json:"object"`
+		Embedding interface{} `json:"embedding"`
+		Index     int         `json:"index"`
 	} `json:"data"`
 	Model string `json:"model"`
 	Usage struct {

@@ -3,11 +3,13 @@ package handler
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"log/slog"
+	"math"
 	"net/http"
 	"os"
 	"regexp"
@@ -220,16 +222,19 @@ func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request, result *
 			"last_accessed", cache.LastAccessed,
 		)
 
+		// Format the embedding according to the requested format
+		formattedEmbedding := formatEmbedding(cache.EmbeddingData, req.EncodingFormat)
+
 		resp := upstream.EmbeddingResponse{
 			Object: "list",
 			Data: []struct {
-				Object    string    `json:"object"`
-				Embedding []float32 `json:"embedding"`
-				Index     int       `json:"index"`
+				Object    string      `json:"object"`
+				Embedding interface{} `json:"embedding"`
+				Index     int         `json:"index"`
 			}{
 				{
 					Object:    "embedding",
-					Embedding: cache.EmbeddingData,
+					Embedding: formattedEmbedding,
 					Index:     0,
 				},
 			},
@@ -266,13 +271,26 @@ func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request, result *
 		return result.err
 	}
 
-	// 成功時はキャッシュに保存
-	if err := h.db.StoreEmbedding(inputHashStr, req.Model, resp.Data[0].Embedding); err != nil {
+	// Store the original float32 embedding in cache
+	embedding, ok := convertToFloat32Slice(resp.Data[0].Embedding)
+	if !ok {
+		result.status = http.StatusInternalServerError
+		result.err = fmt.Errorf("unexpected embedding type from upstream")
+		writeError(w, result.status, "Unexpected embedding type from upstream", "internal_error")
+		return result.err
+	}
+	if err := h.db.StoreEmbedding(inputHashStr, req.Model, embedding); err != nil {
 		slog.Error("failed to store cache",
 			"error", err,
 			"input_hash", inputHashStr,
 			"model", req.Model,
 		)
+	}
+
+	// Format the response according to the requested format if needed
+	if req.EncodingFormat == "base64" {
+		formattedEmbedding := float32ToBase64(embedding)
+		resp.Data[0].Embedding = formattedEmbedding
 	}
 
 	// 成功時のメタデータを記録
@@ -284,4 +302,66 @@ func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request, result *
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	return json.NewEncoder(w).Encode(resp)
+}
+
+func float32ToBase64(values []float32) string {
+	// Convert float32 to bytes
+	buf := new(bytes.Buffer)
+	for _, v := range values {
+		bits := math.Float32bits(v)
+		buf.Write([]byte{byte(bits), byte(bits >> 8), byte(bits >> 16), byte(bits >> 24)})
+	}
+
+	// Encode to base64
+	return base64.StdEncoding.EncodeToString(buf.Bytes())
+}
+
+func formatEmbedding(embedding []float32, format string) interface{} {
+	if format == "base64" {
+		return float32ToBase64(embedding)
+	}
+	return embedding
+}
+
+func convertToFloat32Slice(v interface{}) ([]float32, bool) {
+	slog.Debug("converting embedding",
+		"type", fmt.Sprintf("%T", v),
+		"value", fmt.Sprintf("%v", v),
+	)
+
+	switch x := v.(type) {
+	case []float32:
+		slog.Debug("found float32 slice")
+		return x, true
+	case []float64:
+		slog.Debug("found float64 slice")
+		// Convert float64 slice to float32 slice
+		result := make([]float32, len(x))
+		for i, val := range x {
+			result[i] = float32(val)
+		}
+		return result, true
+	case []interface{}:
+		slog.Debug("found interface slice")
+		// Convert []interface{} to []float32
+		result := make([]float32, len(x))
+		for i, val := range x {
+			switch v := val.(type) {
+			case float64:
+				result[i] = float32(v)
+			case float32:
+				result[i] = v
+			default:
+				slog.Debug("invalid type in interface slice",
+					"index", i,
+					"type", fmt.Sprintf("%T", val),
+				)
+				return nil, false
+			}
+		}
+		return result, true
+	default:
+		slog.Debug("unknown type")
+		return nil, false
+	}
 }
