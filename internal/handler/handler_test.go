@@ -154,7 +154,7 @@ func TestHandleEmbeddings(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler := NewHandler(allowedModels, apiKeyPattern, ts.URL, db)
+			handler := NewHandler(allowedModels, apiKeyPattern, ts.URL, db, false)
 
 			var body []byte
 			if tt.body != nil {

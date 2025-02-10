@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"log/slog"
 	"net/http"
@@ -26,9 +28,10 @@ type Handler struct {
 	apiKeyRegexp  *regexp.Regexp
 	upstream      *upstream.Client
 	db            *storage.DB
+	debugBody     bool
 }
 
-func NewHandler(allowedModels []string, apiKeyPattern string, upstreamURL string, db *storage.DB) http.Handler {
+func NewHandler(allowedModels []string, apiKeyPattern string, upstreamURL string, db *storage.DB, debugBody bool) http.Handler {
 	var re *regexp.Regexp
 	if apiKeyPattern != "" {
 		var err error
@@ -44,6 +47,7 @@ func NewHandler(allowedModels []string, apiKeyPattern string, upstreamURL string
 		apiKeyRegexp:  re,
 		upstream:      upstream.NewClient(upstreamURL),
 		db:            db,
+		debugBody:     debugBody,
 	}
 }
 
@@ -117,6 +121,18 @@ type requestResult struct {
 }
 
 func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request, result *requestResult) error {
+	// debug payload
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		result.status = http.StatusBadRequest
+		result.err = fmt.Errorf("failed to read request body: %w", err)
+		writeError(w, result.status, "Failed to read request body", "invalid_request_error")
+		return result.err
+	}
+	if h.debugBody {
+		slog.Debug("request payload", "payload", string(body))
+	}
+
 	if r.URL.Path != "/v1/embeddings" {
 		result.status = http.StatusNotFound
 		result.err = fmt.Errorf("not found")
@@ -156,7 +172,7 @@ func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request, result *
 	}
 
 	var req upstream.EmbeddingRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&req); err != nil {
 		result.status = http.StatusBadRequest
 		result.err = fmt.Errorf("invalid json: %w", err)
 		writeError(w, result.status, "Invalid JSON payload: "+err.Error(), "invalid_request_error")

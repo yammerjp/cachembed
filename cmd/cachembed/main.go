@@ -33,6 +33,7 @@ type ServeCmd struct {
 	UpstreamURL   string   `help:"URL of the upstream embedding API." env:"CACHEMBED_UPSTREAM_URL" default:"https://api.openai.com/v1/embeddings"`
 	AllowedModels []string `help:"List of allowed embedding models." env:"CACHEMBED_ALLOWED_MODELS" default:"text-embedding-3-small,text-embedding-3-large,text-embedding-ada-002"`
 	APIKeyPattern string   `help:"Regular expression pattern for API key validation." env:"CACHEMBED_API_KEY_PATTERN" default:"^sk-[a-zA-Z0-9_-]+$"`
+	DebugBody     bool     `help:"Debug request body." env:"CACHEMBED_DEBUG_BODY" default:"false"`
 }
 
 type GCCmd struct {
@@ -85,14 +86,14 @@ func Run(bi BuildInfo) {
 
 	switch ctx.Command() {
 	case "serve":
-		runServer(cli.Serve, cli.DSN)
+		runServer(cli.Serve, cli.DSN, cli.Serve.DebugBody)
 	case "gc":
 		runGarbageCollection(cli.GC, cli.DSN)
 	case "migrate":
 		runMigration(cli.DSN)
 	case "migrate-and-serve":
 		runMigration(cli.DSN)
-		runServer(cli.MigrateAndServe.ServeCmd, cli.DSN)
+		runServer(cli.MigrateAndServe.ServeCmd, cli.DSN, cli.MigrateAndServe.DebugBody)
 	case "version":
 		runVersion()
 	default:

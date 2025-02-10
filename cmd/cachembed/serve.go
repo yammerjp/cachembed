@@ -10,7 +10,7 @@ import (
 	"github.com/yammerjp/cachembed/internal/storage"
 )
 
-func runServer(cmd ServeCmd, dsn string) {
+func runServer(cmd ServeCmd, dsn string, debugBody bool) {
 	slog.Info("starting server",
 		"host", cmd.Host,
 		"port", cmd.Port,
@@ -27,7 +27,7 @@ func runServer(cmd ServeCmd, dsn string) {
 	defer db.Close()
 
 	// ハンドラの作成
-	handler := handler.NewHandler(cmd.AllowedModels, cmd.APIKeyPattern, cmd.UpstreamURL, db)
+	handler := handler.NewHandler(cmd.AllowedModels, cmd.APIKeyPattern, cmd.UpstreamURL, db, debugBody)
 
 	// サーバーの起動
 	addr := fmt.Sprintf("%s:%d", cmd.Host, cmd.Port)
