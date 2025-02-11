@@ -47,6 +47,14 @@ class EmbeddingForm
   def do_embedding
     upstream_client = UpstreamClient.new(api_key: api_key, embedding_form: self)
     upstream_client.post
+    # res = upstream_client.post
+
+    # # encoding_formatがbase64で、input.input_formatがstringのとき、Embeddingを作成する
+    # if encoding_format == 'base64' && input.input_format == :string
+    #   embedding = Embedding.create_from_str_and_base64(input_str: input.input, content_base64: res['data'][0]['embedding'], model: model, dimensions: dimensions)
+    # end
+
+    # res
   end
 
   private
