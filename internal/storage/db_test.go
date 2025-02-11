@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yammerjp/cachembed/internal/testhelper"
+	"github.com/yammerjp/cachembed/internal/util"
 )
 
 func TestNewDB(t *testing.T) {
@@ -133,7 +133,7 @@ func TestEmbeddingCacheOperations(t *testing.T) {
 	inputHash := "testhash123"
 	model := "test-model"
 	dimension := 0
-	embedding := testhelper.Base64Dummy1
+	embedding := util.Base64Dummy1
 
 	// Store操作のテスト
 	t.Run("store embedding", func(t *testing.T) {
@@ -188,7 +188,7 @@ func TestEmbeddingCacheOperations(t *testing.T) {
 			_, err := db.Exec(db.dialect.ConvertPlaceholders(`
 				INSERT INTO embeddings (input_hash, model, embedding_data, created_at, last_accessed_at)
 				VALUES ($1, $2, $3, $4, $5)
-			`), hash, model, testhelper.Base64Dummy1, oldTime, oldTime)
+			`), hash, model, util.Base64Dummy1, oldTime, oldTime)
 			if err != nil {
 				t.Fatalf("Failed to create old entry: %v", err)
 			}
@@ -196,7 +196,7 @@ func TestEmbeddingCacheOperations(t *testing.T) {
 
 		// 新しいエントリを作成
 		for i := 0; i < 5; i++ {
-			embedding := testhelper.Base64Dummy1
+			embedding := util.Base64Dummy1
 			hash := fmt.Sprintf("new_hash%d", i)
 			if err := db.StoreEmbedding(hash, model, dimension, embedding); err != nil {
 				t.Fatalf("Failed to store embedding: %v", err)
@@ -259,7 +259,7 @@ func TestDeleteOldEntries(t *testing.T) {
 
 	// テストデータ
 	model := "test-model"
-	embedding := testhelper.Base64Dummy1
+	embedding := util.Base64Dummy1
 	dimension := 0
 
 	// 現在時刻を基準として保存
@@ -384,7 +384,7 @@ func TestDeleteEntriesBeforeWithIDRange(t *testing.T) {
 	// テストデータ
 	model := "test-model"
 	dimension := 0
-	embedding := testhelper.Base64Dummy1
+	embedding := util.Base64Dummy1
 
 	// 現在時刻を基準として保存
 	baseTime := time.Now().UTC()
@@ -498,7 +498,7 @@ func TestDeleteEntriesBeforeWithSleep(t *testing.T) {
 	defer db.Close()
 
 	// テストデータの作成（10エントリ）
-	embedding := testhelper.Base64Dummy1
+	embedding := util.Base64Dummy1
 	dimension := 0
 
 	for i := 0; i < 10; i++ {
@@ -664,7 +664,7 @@ func testEmbeddingOperations(t *testing.T, db *DB) {
 	inputHash := "testhash123"
 	model := "test-model"
 	dimension := 0
-	embedding := testhelper.Base64Dummy1
+	embedding := util.Base64Dummy1
 
 	// Store操作のテスト
 	t.Run("store embedding", func(t *testing.T) {
@@ -700,7 +700,7 @@ func testGarbageCollection(t *testing.T, db *DB) {
 
 	model := "test-model"
 	dimension := 0
-	embedding := testhelper.Base64Dummy1
+	embedding := util.Base64Dummy1
 	baseTime := time.Now().UTC()
 	oldTime := baseTime.Add(-1 * time.Hour)
 
@@ -815,7 +815,7 @@ func testIDRangeDeletion(t *testing.T, db *DB) {
 
 	model := "test-model"
 	dimension := 0
-	embedding := testhelper.Base64Dummy1
+	embedding := util.Base64Dummy1
 	baseTime := time.Now().UTC()
 	oldTime := baseTime.Add(-1 * time.Hour)
 
@@ -943,7 +943,7 @@ func TestGetMaxID(t *testing.T) {
 
 			// テストデータを挿入
 			dimension := 0
-			embedding := testhelper.Base64Dummy1
+			embedding := util.Base64Dummy1
 			for i := 0; i < 5; i++ {
 				hash := fmt.Sprintf("hash%d", i)
 				if err := db.StoreEmbedding(hash, "test-model", dimension, embedding); err != nil {

@@ -14,8 +14,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/yammerjp/cachembed/internal/storage"
-	"github.com/yammerjp/cachembed/internal/types"
 	"github.com/yammerjp/cachembed/internal/upstream"
+	"github.com/yammerjp/cachembed/internal/util"
 )
 
 type Handler struct {
@@ -190,7 +190,7 @@ func (h *Handler) inHandleRequest(w http.ResponseWriter, r *http.Request) error 
 			if rawReq.EncodingFormat == "base64" {
 				responseEmbedding = cache
 			} else {
-				responseEmbedding, err = Base64ToFloat32Slice(cache)
+				responseEmbedding, err = util.Base64ToFloat32Slice(cache)
 				if err != nil {
 					return NewHandlerError(
 						http.StatusInternalServerError,
@@ -256,7 +256,7 @@ func (h *Handler) inHandleRequest(w http.ResponseWriter, r *http.Request) error 
 					fmt.Errorf("unexpected embedding type: %T", data.Embedding),
 				)
 			}
-			embedding := types.EmbeddedVectorBase64(data.Embedding.(string))
+			embedding := util.EmbeddedVectorBase64(data.Embedding.(string))
 
 			// キャッシュに保存
 			if err := h.db.StoreEmbedding(hashes[missedIndexes[i]], req.Model, req.Dimension, embedding); err != nil {
@@ -273,7 +273,7 @@ func (h *Handler) inHandleRequest(w http.ResponseWriter, r *http.Request) error 
 			if rawReq.EncodingFormat == "base64" {
 				responseEmbedding = embedding
 			} else {
-				responseEmbedding, err = Base64ToFloat32Slice(embedding)
+				responseEmbedding, err = util.Base64ToFloat32Slice(embedding)
 				if err != nil {
 					return NewHandlerError(
 						http.StatusInternalServerError,

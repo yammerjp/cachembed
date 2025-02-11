@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/yammerjp/cachembed/internal/types"
+	"github.com/yammerjp/cachembed/internal/util"
 )
 
 const (
@@ -125,8 +125,8 @@ func (db *DB) RunMigrations() error {
 	return nil
 }
 
-func (db *DB) GetEmbedding(hash string, model string, dimension int) (types.EmbeddedVectorBase64, error) {
-	var embeddingBase64 types.EmbeddedVectorBase64
+func (db *DB) GetEmbedding(hash string, model string, dimension int) (util.EmbeddedVectorBase64, error) {
+	var embeddingBase64 util.EmbeddedVectorBase64
 	err := db.QueryRow(
 		sqlGetEmbedding,
 		hash,
@@ -156,7 +156,7 @@ func (db *DB) GetEmbedding(hash string, model string, dimension int) (types.Embe
 	return embeddingBase64, nil
 }
 
-func (db *DB) StoreEmbedding(inputHash, model string, dimension int, embeddingBase64 types.EmbeddedVectorBase64) error {
+func (db *DB) StoreEmbedding(inputHash, model string, dimension int, embeddingBase64 util.EmbeddedVectorBase64) error {
 	now := time.Now().UTC()
 
 	query := db.dialect.ConvertPlaceholders(sqlStoreEmbedding)

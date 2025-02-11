@@ -1,24 +1,22 @@
-package handler
+package util
 
 import (
 	"bytes"
 	"encoding/base64"
 	"fmt"
 	"math"
-
-	"github.com/yammerjp/cachembed/internal/types"
 )
 
-func Float32ToBase64(values types.EmbeddedVectorFloat32) (types.EmbeddedVectorBase64, error) {
+func Float32ToBase64(values EmbeddedVectorFloat32) (EmbeddedVectorBase64, error) {
 	buf := new(bytes.Buffer)
 	for _, v := range values {
 		bits := math.Float32bits(v)
 		buf.Write([]byte{byte(bits), byte(bits >> 8), byte(bits >> 16), byte(bits >> 24)})
 	}
-	return types.EmbeddedVectorBase64(base64.StdEncoding.EncodeToString(buf.Bytes())), nil
+	return EmbeddedVectorBase64(base64.StdEncoding.EncodeToString(buf.Bytes())), nil
 }
 
-func Base64ToFloat32Slice(b64 types.EmbeddedVectorBase64) (types.EmbeddedVectorFloat32, error) {
+func Base64ToFloat32Slice(b64 EmbeddedVectorBase64) (EmbeddedVectorFloat32, error) {
 	data, err := base64.StdEncoding.DecodeString(string(b64))
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode base64: %w", err)
@@ -36,5 +34,5 @@ func Base64ToFloat32Slice(b64 types.EmbeddedVectorBase64) (types.EmbeddedVectorF
 			uint32(data[i+3])<<24
 		result[i/4] = math.Float32frombits(bits)
 	}
-	return types.EmbeddedVectorFloat32(result), nil
+	return EmbeddedVectorFloat32(result), nil
 }
