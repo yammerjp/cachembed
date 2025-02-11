@@ -35,7 +35,7 @@ class EmbeddingForm
   def to_hash
     hash = {
       model: model,
-      input: input&.to_hash
+      input: input.to_hash
     }
 
     hash[:dimensions] = dimensions if dimensions.present?
