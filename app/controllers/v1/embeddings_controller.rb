@@ -1,35 +1,58 @@
 class V1::EmbeddingsController < ApplicationController
+  class InvalidInputError < StandardError; end
+
   skip_before_action :verify_authenticity_token
+  before_action :require_api_key
+
+  rescue_from InvalidInputError do |e|
+    render json: { error: "Invalid input" }, status: :bad_request
+  end
 
   def create
-    # TODO: 実際の埋め込み処理をここに実装
-    @embedding = {
-      object: "list",
-      data: [
-        {
-          object: "embedding",
-          embedding: [0.0023064255, -0.009327292, 0.015954146],  # サンプル値
-          index: 0
-        }
-      ],
-      model: "text-embedding-ada-002",
-      usage: {
-        prompt_tokens: 8,
-        total_tokens: 8
-      }
-    }
+    form = EmbeddingForm.new(create_params)
+
+    @embedding = form.do_embedding
   end
 
   private
 
   def create_params
-    permitted_params = params.require(:embedding).permit(:model, :dimensions, :input, :encoding_format)
-    input = params[:input]
-    if input.is_a?(Array)
-      permitted_params[:input] = input
-    else
-      permitted_params[:input] = input
+    params.require(:embedding).permit(:model, :dimensions, :encoding_format).merge(input: input_param, api_key: api_key)
+  end
+
+  def input_param
+    input = params.require(:embedding)[:input]
+
+    if input.is_a?(String)
+      # "hello"
+      return input
     end
-    permitted_params
+
+    if input.is_a?(Array) && input.all? { |i| i.is_a?(Integer) }
+      # [1, 2, 3]
+      return input
+    end
+
+    if input.is_a?(Array) && input.all? { |i| i.is_a?(String) }
+      # ["hello", "world"]
+      return input
+    end
+
+    if input.is_a?(Array) && input.all? { |i| i.is_a?(Array) && i.all? { |j| j.is_a?(Integer) } }
+      # [[1, 2, 3], [4, 5, 6]]
+      return input
+    end
+
+    raise InvalidInputError
+  end
+
+  def require_api_key
+    unless api_key.present?
+      render json: { error: "Unauthorized" }, status: :unauthorized
+    end
+  end
+
+  def api_key
+    request.headers["Authorization"]&.split(" ")&.last
   end
 end
