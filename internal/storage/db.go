@@ -1,12 +1,12 @@
 package storage
 
 import (
-	"bytes"
 	"database/sql"
-	"encoding/binary"
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/yammerjp/cachembed/internal/types"
 )
 
 const (
@@ -15,31 +15,32 @@ const (
 		id %s,
 		input_hash TEXT NOT NULL,
 		model TEXT NOT NULL,
-		embedding_data %s NOT NULL,
+		dimension INTEGER DEFAULT 0 NOT NULL, -- dimension of 0 indicates the API's default dimension size
+		embedding_data TEXT NOT NULL, -- base64 encoded float array
 		created_at TIMESTAMP NOT NULL,
 		last_accessed_at TIMESTAMP NOT NULL,
-		UNIQUE(input_hash, model)
+		UNIQUE(input_hash, model, dimension)
 	)`
 
 	createIndexSQL = `
-	CREATE INDEX IF NOT EXISTS idx_input_model 
-	ON embeddings(input_hash, model)
+	CREATE INDEX IF NOT EXISTS idx_input_model_dim 
+	ON embeddings(input_hash, model, dimension)
 	`
 
 	sqlGetEmbedding = `
 	SELECT embedding_data
 	FROM embeddings 
-	WHERE input_hash = $1 AND model = $2`
+	WHERE input_hash = $1 AND model = $2 AND dimension = $3`
 
 	sqlUpdateLastAccessed = `
 	UPDATE embeddings
 	SET last_accessed_at = $1
-	WHERE input_hash = $2 AND model = $3`
+	WHERE input_hash = $2 AND model = $3 AND dimension = $4`
 
 	sqlStoreEmbedding = `
-	INSERT INTO embeddings (input_hash, model, embedding_data, created_at, last_accessed_at) 
-	VALUES ($1, $2, $3, $4, $5)
-	ON CONFLICT(input_hash, model) DO UPDATE 
+	INSERT INTO embeddings (input_hash, model, dimension, embedding_data, created_at, last_accessed_at) 
+	VALUES ($1, $2, $3, $4, $5, $6)
+	ON CONFLICT(input_hash, model, dimension) DO UPDATE 
 	SET embedding_data = EXCLUDED.embedding_data,
 		last_accessed_at = EXCLUDED.last_accessed_at`
 
@@ -55,7 +56,7 @@ const (
 )
 
 type EmbeddingCache struct {
-	EmbeddingData []float32
+	EmbeddingData string
 	CreatedAt     time.Time
 	LastAccessed  time.Time
 }
@@ -64,6 +65,11 @@ type DB struct {
 	*sql.DB
 	sleeper Sleeper
 	dialect Dialect
+}
+
+func (db *DB) Exec(query string, args ...interface{}) (sql.Result, error) {
+	query = db.dialect.ConvertPlaceholders(query)
+	return db.DB.Exec(query, args...)
 }
 
 func NewDB(dsn string) (*DB, error) {
@@ -107,8 +113,7 @@ func (db *DB) Close() error {
 
 func (db *DB) RunMigrations() error {
 	createTableSQL := fmt.Sprintf(sqlCreateTable,
-		db.dialect.GetPrimaryKeyType(),
-		db.dialect.GetBlobType())
+		db.dialect.GetPrimaryKeyType())
 
 	if _, err := db.Exec(createTableSQL); err != nil {
 		return fmt.Errorf("failed to create schema: %w", err)
@@ -120,51 +125,42 @@ func (db *DB) RunMigrations() error {
 	return nil
 }
 
-func (db *DB) GetEmbedding(hash string, model string) ([]float32, error) {
-	var embeddingBytes []byte
+func (db *DB) GetEmbedding(hash string, model string, dimension int) (types.EmbeddedVectorBase64, error) {
+	var embeddingBase64 types.EmbeddedVectorBase64
 	err := db.QueryRow(
-		db.dialect.ConvertPlaceholders(sqlGetEmbedding),
+		sqlGetEmbedding,
 		hash,
 		model,
-	).Scan(&embeddingBytes)
+		dimension,
+	).Scan(&embeddingBase64)
 
 	if err == sql.ErrNoRows {
-		return nil, nil
+		return "", nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to query embedding: %w", err)
-	}
-
-	// バイト列をfloat32スライスに変換
-	embedding := make([]float32, len(embeddingBytes)/4)
-	if err := binary.Read(bytes.NewReader(embeddingBytes), binary.LittleEndian, embedding); err != nil {
-		return nil, fmt.Errorf("failed to decode embedding: %w", err)
+		return "", fmt.Errorf("failed to query embedding: %w", err)
 	}
 
 	// 最終アクセス時刻を更新
 	_, err = db.Exec(
-		db.dialect.ConvertPlaceholders(sqlUpdateLastAccessed),
+		sqlUpdateLastAccessed,
 		time.Now().UTC(),
 		hash,
 		model,
+		dimension,
 	)
 	if err != nil {
 		slog.Error("failed to update last accessed time", "error", err)
 	}
 
-	return embedding, nil
+	return embeddingBase64, nil
 }
 
-func (db *DB) StoreEmbedding(inputHash, model string, embedding []float32) error {
-	buf := new(bytes.Buffer)
-	if err := binary.Write(buf, binary.LittleEndian, embedding); err != nil {
-		return fmt.Errorf("failed to encode embedding data: %w", err)
-	}
-
+func (db *DB) StoreEmbedding(inputHash, model string, dimension int, embeddingBase64 types.EmbeddedVectorBase64) error {
 	now := time.Now().UTC()
 
 	query := db.dialect.ConvertPlaceholders(sqlStoreEmbedding)
-	_, err := db.Exec(query, inputHash, model, buf.Bytes(), now, now)
+	_, err := db.Exec(query, inputHash, model, dimension, embeddingBase64, now, now)
 	if err != nil {
 		return fmt.Errorf("failed to store embedding: %w", err)
 	}

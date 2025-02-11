@@ -9,6 +9,7 @@ type EmbeddingRequest struct {
 	Input          interface{} `json:"input"`
 	Model          string      `json:"model"`
 	EncodingFormat string      `json:"encoding_format,omitempty"`
+	Dimension      int         `json:"dimension,omitempty"`
 }
 
 // EmbeddingResponse は埋め込みベクトル生成レスポンスを表します

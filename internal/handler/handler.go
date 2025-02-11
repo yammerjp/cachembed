@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/yammerjp/cachembed/internal/storage"
+	"github.com/yammerjp/cachembed/internal/types"
 	"github.com/yammerjp/cachembed/internal/upstream"
 )
 
@@ -117,6 +118,7 @@ func (h *Handler) inHandleRequest(w http.ResponseWriter, r *http.Request) error 
 		Input          json.RawMessage `json:"input"`
 		Model          string          `json:"model"`
 		EncodingFormat string          `json:"encoding_format,omitempty"`
+		Dimension      int             `json:"dimension,omitempty"`
 	}
 	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&rawReq); err != nil {
 		return NewHandlerError(
@@ -143,6 +145,7 @@ func (h *Handler) inHandleRequest(w http.ResponseWriter, r *http.Request) error 
 		Input:          input.ToAPIInput(),
 		Model:          rawReq.Model,
 		EncodingFormat: "base64",
+		Dimension:      rawReq.Dimension,
 	}
 
 	if err := h.validateEmbeddingRequest(&req); err != nil {
@@ -173,7 +176,7 @@ func (h *Handler) inHandleRequest(w http.ResponseWriter, r *http.Request) error 
 		// 	)
 		// }
 		// slog.Info("check cache", "hash", hash, "model", req.Model, "input", pickedInput)
-		cache, err := h.db.GetEmbedding(hash, req.Model)
+		cache, err := h.db.GetEmbedding(hash, req.Model, req.Dimension)
 		if err != nil {
 			return NewHandlerError(
 				http.StatusInternalServerError,
@@ -182,12 +185,20 @@ func (h *Handler) inHandleRequest(w http.ResponseWriter, r *http.Request) error 
 				err,
 			)
 		}
-		if cache != nil {
+		if cache != "" {
 			var responseEmbedding interface{}
 			if rawReq.EncodingFormat == "base64" {
-				responseEmbedding = float32ToBase64(cache)
-			} else {
 				responseEmbedding = cache
+			} else {
+				responseEmbedding, err = Base64ToFloat32Slice(cache)
+				if err != nil {
+					return NewHandlerError(
+						http.StatusInternalServerError,
+						"Failed to decode base64 embedding from cache",
+						"internal_error",
+						err,
+					)
+				}
 			}
 			responseEmbeddingDatas[i] = upstream.EmbeddingData{
 				Object:    "embedding",
@@ -237,38 +248,7 @@ func (h *Handler) inHandleRequest(w http.ResponseWriter, r *http.Request) error 
 
 		// APIレスポンスをキャッシュに保存し、レスポンスに組み込む
 		for i, data := range missedResp.Data {
-			// base64からfloat32に変換
-			var embedding []float32
-			switch v := data.Embedding.(type) {
-			case string:
-				// base64エンコードされた文字列の場合
-				var err error
-				embedding, err = base64ToFloat32Slice(v)
-				if err != nil {
-					return NewHandlerError(
-						http.StatusInternalServerError,
-						"Failed to decode base64 embedding from upstream",
-						"internal_error",
-						err,
-					)
-				}
-			case []interface{}:
-				// float64の配列の場合
-				embedding = make([]float32, len(v))
-				for j, val := range v {
-					switch num := val.(type) {
-					case float64:
-						embedding[j] = float32(num)
-					default:
-						return NewHandlerError(
-							http.StatusInternalServerError,
-							"Invalid embedding type from upstream",
-							"internal_error",
-							fmt.Errorf("unexpected type in embedding array: %T", val),
-						)
-					}
-				}
-			default:
+			if _, ok := data.Embedding.(string); !ok {
 				return NewHandlerError(
 					http.StatusInternalServerError,
 					"Invalid embedding type from upstream",
@@ -276,9 +256,10 @@ func (h *Handler) inHandleRequest(w http.ResponseWriter, r *http.Request) error 
 					fmt.Errorf("unexpected embedding type: %T", data.Embedding),
 				)
 			}
+			embedding := types.EmbeddedVectorBase64(data.Embedding.(string))
 
 			// キャッシュに保存
-			if err := h.db.StoreEmbedding(hashes[missedIndexes[i]], req.Model, embedding); err != nil {
+			if err := h.db.StoreEmbedding(hashes[missedIndexes[i]], req.Model, req.Dimension, embedding); err != nil {
 				slog.Error("failed to store cache",
 					"error", err,
 					"input_hash", hashes[missedIndexes[i]],
@@ -290,9 +271,17 @@ func (h *Handler) inHandleRequest(w http.ResponseWriter, r *http.Request) error 
 			// クライアントのリクエストに応じたフォーマットでレスポンスを設定
 			var responseEmbedding interface{}
 			if rawReq.EncodingFormat == "base64" {
-				responseEmbedding = data.Embedding
-			} else {
 				responseEmbedding = embedding
+			} else {
+				responseEmbedding, err = Base64ToFloat32Slice(embedding)
+				if err != nil {
+					return NewHandlerError(
+						http.StatusInternalServerError,
+						"Failed to decode base64 embedding from upstream",
+						"internal_error",
+						err,
+					)
+				}
 			}
 
 			// レスポンスに組み込む

@@ -43,3 +43,8 @@ const testArray3 = [0.875, 0.9375, 0.15625] // 7/8, 15/16, 5/32
 const base643 = floatToBase64(testArray3)
 console.log('Base64:', base643)
 console.log('Decoded:', base64ToFloat(base643))
+
+const testArray4 = [0.15625, 0.5, 0.875] // 5/32, 1/2, 7/8
+const base644 = floatToBase64(testArray4)
+console.log('Base64:', base644)
+console.log('Decoded:', base64ToFloat(base644))

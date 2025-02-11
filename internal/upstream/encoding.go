@@ -6,7 +6,7 @@ import (
 	"math"
 )
 
-func float32ToBase64(values []float32) string {
+func Float32ToBase64(values []float32) string {
 	buf := new(bytes.Buffer)
 	for _, v := range values {
 		bits := math.Float32bits(v)

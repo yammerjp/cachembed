@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/yammerjp/cachembed/internal/storage"
+	"github.com/yammerjp/cachembed/internal/testhelper"
+	"github.com/yammerjp/cachembed/internal/types"
 	"github.com/yammerjp/cachembed/internal/upstream"
 )
 
@@ -16,7 +18,8 @@ func TestHandleRequest(t *testing.T) {
 	type InitialData struct {
 		inputHash string
 		model     string
-		embedding []float32
+		embedding types.EmbeddedVectorBase64
+		dimension int
 	}
 
 	type Request struct {
@@ -61,7 +64,7 @@ func TestHandleRequest(t *testing.T) {
 					Data: []upstream.EmbeddingData{
 						{
 							Object:    "embedding",
-							Embedding: base64Dummy1,
+							Embedding: testhelper.Base64Dummy1,
 							Index:     0,
 						},
 					},
@@ -80,7 +83,7 @@ func TestHandleRequest(t *testing.T) {
 					Data: []upstream.EmbeddingData{
 						{
 							Object:    "embedding",
-							Embedding: vecDummy1,
+							Embedding: testhelper.VecDummy1,
 							Index:     0,
 						},
 					},
@@ -120,7 +123,7 @@ func TestHandleRequest(t *testing.T) {
 					Data: []upstream.EmbeddingData{
 						{
 							Object:    "embedding",
-							Embedding: base64Dummy1,
+							Embedding: testhelper.Base64Dummy1,
 							Index:     0,
 						},
 					},
@@ -139,7 +142,7 @@ func TestHandleRequest(t *testing.T) {
 					Data: []upstream.EmbeddingData{
 						{
 							Object:    "embedding",
-							Embedding: base64Dummy1,
+							Embedding: testhelper.Base64Dummy1,
 							Index:     0,
 						},
 					},
@@ -157,7 +160,7 @@ func TestHandleRequest(t *testing.T) {
 				{
 					inputHash: "e02aa1b106d5c7c6a98def2b13005d5b84fd8dc8",
 					model:     "text-embedding-ada-002",
-					embedding: []float32{0.1, 0.2, 0.3},
+					embedding: testhelper.Base64Dummy1,
 				},
 			},
 			request: Request{
@@ -174,7 +177,7 @@ func TestHandleRequest(t *testing.T) {
 					Data: []upstream.EmbeddingData{
 						{
 							Object:    "embedding",
-							Embedding: []float32{0.1, 0.2, 0.3},
+							Embedding: testhelper.VecDummy1,
 							Index:     0,
 						},
 					},
@@ -200,7 +203,7 @@ func TestHandleRequest(t *testing.T) {
 					Data: []upstream.EmbeddingData{
 						{
 							Object:    "embedding",
-							Embedding: base64Dummy1,
+							Embedding: testhelper.Base64Dummy1,
 							Index:     0,
 						},
 					},
@@ -219,7 +222,7 @@ func TestHandleRequest(t *testing.T) {
 					Data: []upstream.EmbeddingData{
 						{
 							Object:    "embedding",
-							Embedding: vecDummy1,
+							Embedding: testhelper.VecDummy1,
 							Index:     0,
 						},
 					},
@@ -246,12 +249,12 @@ func TestHandleRequest(t *testing.T) {
 					Data: []upstream.EmbeddingData{
 						{
 							Object:    "embedding",
-							Embedding: base64Dummy1,
+							Embedding: testhelper.Base64Dummy1,
 							Index:     0,
 						},
 						{
 							Object:    "embedding",
-							Embedding: base64Dummy2,
+							Embedding: testhelper.Base64Dummy2,
 							Index:     1,
 						},
 					},
@@ -271,12 +274,12 @@ func TestHandleRequest(t *testing.T) {
 					Data: []upstream.EmbeddingData{
 						{
 							Object:    "embedding",
-							Embedding: base64Dummy1,
+							Embedding: testhelper.Base64Dummy1,
 							Index:     0,
 						},
 						{
 							Object:    "embedding",
-							Embedding: base64Dummy2,
+							Embedding: testhelper.Base64Dummy2,
 							Index:     1,
 						},
 					},
@@ -294,7 +297,7 @@ func TestHandleRequest(t *testing.T) {
 				{
 					inputHash: "70c07ec18ef89c5309bbb0937f3a6342411e1fdd", // "World"のハッシュ
 					model:     "text-embedding-ada-002",
-					embedding: []float32{0.125, 0.25, 0.5},
+					embedding: testhelper.Base64Dummy1,
 				},
 			},
 			request: Request{
@@ -309,7 +312,7 @@ func TestHandleRequest(t *testing.T) {
 					Data: []upstream.EmbeddingData{
 						{
 							Object:    "embedding",
-							Embedding: base64Dummy1,
+							Embedding: testhelper.Base64Dummy1,
 							Index:     0,
 						},
 					},
@@ -328,7 +331,7 @@ func TestHandleRequest(t *testing.T) {
 					Data: []upstream.EmbeddingData{
 						{
 							Object:    "embedding",
-							Embedding: vecDummy1,
+							Embedding: testhelper.VecDummy1,
 							Index:     0,
 						},
 						{
@@ -351,12 +354,12 @@ func TestHandleRequest(t *testing.T) {
 				{
 					inputHash: "ef510977d15a2498e88750ef53092291499b5e83", // [3, 4]
 					model:     "text-embedding-ada-002",
-					embedding: []float32{0.4, 0.5, 0.6},
+					embedding: testhelper.Base64Dummy2,
 				},
 				{
 					inputHash: "b8b9b72a24e33fac417a60f2064434b95d408eda", // [7, 8]
 					model:     "text-embedding-ada-002",
-					embedding: []float32{0.4, 0.5, 0.6},
+					embedding: testhelper.Base64Dummy4,
 				},
 			},
 			request: Request{
@@ -374,12 +377,12 @@ func TestHandleRequest(t *testing.T) {
 					Data: []upstream.EmbeddingData{
 						{
 							Object:    "embedding",
-							Embedding: base64Dummy1,
+							Embedding: testhelper.Base64Dummy1,
 							Index:     0,
 						},
 						{
 							Object:    "embedding",
-							Embedding: base64Dummy2,
+							Embedding: testhelper.Base64Dummy3,
 							Index:     1,
 						},
 					},
@@ -398,22 +401,22 @@ func TestHandleRequest(t *testing.T) {
 					Data: []upstream.EmbeddingData{
 						{
 							Object:    "embedding",
-							Embedding: vecDummy1,
+							Embedding: testhelper.VecDummy1,
 							Index:     0,
 						},
 						{
 							Object:    "embedding",
-							Embedding: []float32{0.4, 0.5, 0.6},
+							Embedding: testhelper.VecDummy2,
 							Index:     1,
 						},
 						{
 							Object:    "embedding",
-							Embedding: vecDummy2,
+							Embedding: testhelper.VecDummy3,
 							Index:     2,
 						},
 						{
 							Object:    "embedding",
-							Embedding: []float32{0.4, 0.5, 0.6},
+							Embedding: testhelper.VecDummy4,
 							Index:     3,
 						},
 					},
@@ -431,7 +434,7 @@ func TestHandleRequest(t *testing.T) {
 				{
 					inputHash: "e02aa1b106d5c7c6a98def2b13005d5b84fd8dc8", // "Hello, world"のハッシュ
 					model:     "text-embedding-3-small",
-					embedding: []float32{0.1, 0.2, 0.3},
+					embedding: testhelper.Base64Dummy1,
 				},
 			},
 			request: Request{
@@ -446,7 +449,7 @@ func TestHandleRequest(t *testing.T) {
 					Data: []upstream.EmbeddingData{
 						{
 							Object:    "embedding",
-							Embedding: base64Dummy1,
+							Embedding: testhelper.Base64Dummy1,
 							Index:     0,
 						},
 					},
@@ -465,7 +468,7 @@ func TestHandleRequest(t *testing.T) {
 					Data: []upstream.EmbeddingData{
 						{
 							Object:    "embedding",
-							Embedding: vecDummy1,
+							Embedding: testhelper.VecDummy1,
 							Index:     0,
 						},
 					},
@@ -495,7 +498,7 @@ func TestHandleRequest(t *testing.T) {
 
 			// 初期データをロード
 			for _, data := range tt.initialData {
-				if err := db.StoreEmbedding(data.inputHash, data.model, data.embedding); err != nil {
+				if err := db.StoreEmbedding(data.inputHash, data.model, data.dimension, types.EmbeddedVectorBase64(data.embedding)); err != nil {
 					t.Fatalf("Failed to store initial data: %v", err)
 				}
 			}

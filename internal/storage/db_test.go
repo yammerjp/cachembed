@@ -1,12 +1,12 @@
 package storage
 
 import (
-	"bytes"
-	"encoding/binary"
 	"fmt"
 	"os"
 	"testing"
 	"time"
+
+	"github.com/yammerjp/cachembed/internal/testhelper"
 )
 
 func TestNewDB(t *testing.T) {
@@ -91,7 +91,7 @@ func TestNewDB(t *testing.T) {
 					indices = append(indices, name)
 				}
 
-				expectedIndices := []string{"idx_input_model"}
+				expectedIndices := []string{"idx_input_model_dim"}
 				for _, idx := range expectedIndices {
 					found := false
 					for _, actual := range indices {
@@ -132,15 +132,12 @@ func TestEmbeddingCacheOperations(t *testing.T) {
 	// テストデータ
 	inputHash := "testhash123"
 	model := "test-model"
-	embedding := []float32{0.1,
-		0.2,
-		0.3,
-		0.4,
-		0.5}
+	dimension := 0
+	embedding := testhelper.Base64Dummy1
 
 	// Store操作のテスト
 	t.Run("store embedding", func(t *testing.T) {
-		err := db.StoreEmbedding(inputHash, model, embedding)
+		err := db.StoreEmbedding(inputHash, model, dimension, embedding)
 		if err != nil {
 			t.Fatalf("Failed to store embedding: %v", err)
 		}
@@ -148,32 +145,27 @@ func TestEmbeddingCacheOperations(t *testing.T) {
 
 	// Get操作のテスト
 	t.Run("get embedding", func(t *testing.T) {
-		cache, err := db.GetEmbedding(inputHash, model)
+		cache, err := db.GetEmbedding(inputHash, model, dimension)
 		if err != nil {
 			t.Fatalf("Failed to get embedding: %v", err)
 		}
-		if cache == nil {
+		if cache == "" {
 			t.Fatal("Expected cache hit, got cache miss")
 		}
 
 		// データの検証
-		if len(cache) != len(embedding) {
-			t.Errorf("Expected embedding length %d, got %d", len(embedding), len(cache))
-		}
-		for i, v := range embedding {
-			if cache[i] != v {
-				t.Errorf("Embedding mismatch at index %d: expected %f, got %f", i, v, cache[i])
-			}
+		if cache != embedding {
+			t.Errorf("Expected embedding %v, got %v", embedding, cache)
 		}
 	})
 
 	// キャッシュミスのテスト
 	t.Run("cache miss", func(t *testing.T) {
-		cache, err := db.GetEmbedding("nonexistent", model)
+		cache, err := db.GetEmbedding("nonexistent", model, dimension)
 		if err != nil {
 			t.Fatalf("Failed to query nonexistent embedding: %v", err)
 		}
-		if cache != nil {
+		if cache != "" {
 			t.Error("Expected cache miss, got cache hit")
 		}
 	})
@@ -193,13 +185,10 @@ func TestEmbeddingCacheOperations(t *testing.T) {
 		// 古いエントリを作成
 		for i := 0; i < 5; i++ {
 			hash := fmt.Sprintf("old_hash%d", i)
-			embeddingData := encodeEmbedding([]float32{0.1,
-				0.2,
-				0.3})
 			_, err := db.Exec(db.dialect.ConvertPlaceholders(`
 				INSERT INTO embeddings (input_hash, model, embedding_data, created_at, last_accessed_at)
 				VALUES ($1, $2, $3, $4, $5)
-			`), hash, model, embeddingData, oldTime, oldTime)
+			`), hash, model, testhelper.Base64Dummy1, oldTime, oldTime)
 			if err != nil {
 				t.Fatalf("Failed to create old entry: %v", err)
 			}
@@ -207,10 +196,9 @@ func TestEmbeddingCacheOperations(t *testing.T) {
 
 		// 新しいエントリを作成
 		for i := 0; i < 5; i++ {
+			embedding := testhelper.Base64Dummy1
 			hash := fmt.Sprintf("new_hash%d", i)
-			if err := db.StoreEmbedding(hash, model, []float32{0.1,
-				0.2,
-				0.3}); err != nil {
+			if err := db.StoreEmbedding(hash, model, dimension, embedding); err != nil {
 				t.Fatalf("Failed to store embedding: %v", err)
 			}
 		}
@@ -271,9 +259,8 @@ func TestDeleteOldEntries(t *testing.T) {
 
 	// テストデータ
 	model := "test-model"
-	embedding := []float32{0.1,
-		0.2,
-		0.3}
+	embedding := testhelper.Base64Dummy1
+	dimension := 0
 
 	// 現在時刻を基準として保存
 	baseTime := time.Now().UTC()
@@ -285,7 +272,7 @@ func TestDeleteOldEntries(t *testing.T) {
 		_, err := db.Exec(db.dialect.ConvertPlaceholders(`
 			INSERT INTO embeddings (input_hash, model, embedding_data, created_at, last_accessed_at)
 			VALUES ($1, $2, $3, $4, $5)
-		`), hash, model, encodeEmbedding(embedding), oldTime, oldTime)
+		`), hash, model, embedding, oldTime, oldTime)
 		if err != nil {
 			t.Fatalf("Failed to create old entry: %v", err)
 		}
@@ -294,7 +281,7 @@ func TestDeleteOldEntries(t *testing.T) {
 	// 次に新しいエントリを作成（現在時刻）
 	for i := 0; i < 5; i++ {
 		hash := fmt.Sprintf("new_hash%d", i)
-		if err := db.StoreEmbedding(hash, model, embedding); err != nil {
+		if err := db.StoreEmbedding(hash, model, dimension, embedding); err != nil {
 			t.Fatalf("Failed to store embedding: %v", err)
 		}
 	}
@@ -396,9 +383,8 @@ func TestDeleteEntriesBeforeWithIDRange(t *testing.T) {
 
 	// テストデータ
 	model := "test-model"
-	embedding := []float32{0.1,
-		0.2,
-		0.3}
+	dimension := 0
+	embedding := testhelper.Base64Dummy1
 
 	// 現在時刻を基準として保存
 	baseTime := time.Now().UTC()
@@ -407,7 +393,7 @@ func TestDeleteEntriesBeforeWithIDRange(t *testing.T) {
 	// 10個のエントリを作成
 	for i := 0; i < 10; i++ {
 		hash := fmt.Sprintf("hash%d", i)
-		if err := db.StoreEmbedding(hash, model, embedding); err != nil {
+		if err := db.StoreEmbedding(hash, model, dimension, embedding); err != nil {
 			t.Fatalf("Failed to store embedding: %v", err)
 		}
 	}
@@ -512,12 +498,12 @@ func TestDeleteEntriesBeforeWithSleep(t *testing.T) {
 	defer db.Close()
 
 	// テストデータの作成（10エントリ）
-	embedding := []float32{0.1,
-		0.2,
-		0.3}
+	embedding := testhelper.Base64Dummy1
+	dimension := 0
+
 	for i := 0; i < 10; i++ {
 		hash := fmt.Sprintf("hash%d", i)
-		if err := db.StoreEmbedding(hash, "test-model", embedding); err != nil {
+		if err := db.StoreEmbedding(hash, "test-model", dimension, embedding); err != nil {
 			t.Fatalf("Failed to store embedding: %v", err)
 		}
 	}
@@ -677,38 +663,29 @@ func testEmbeddingOperations(t *testing.T, db *DB) {
 
 	inputHash := "testhash123"
 	model := "test-model"
-	embedding := []float32{0.1,
-		0.2,
-		0.3,
-		0.4,
-		0.5}
+	dimension := 0
+	embedding := testhelper.Base64Dummy1
 
 	// Store操作のテスト
 	t.Run("store embedding", func(t *testing.T) {
-		if err := db.StoreEmbedding(inputHash, model, embedding); err != nil {
+		if err := db.StoreEmbedding(inputHash, model, dimension, embedding); err != nil {
 			t.Fatalf("Failed to store embedding: %v", err)
 		}
 	})
 
 	// Get操作のテスト
 	t.Run("get embedding", func(t *testing.T) {
-		cache, err := db.GetEmbedding(inputHash, model)
+		cache, err := db.GetEmbedding(inputHash, model, dimension)
 		if err != nil {
 			t.Fatalf("Failed to get embedding: %v", err)
 		}
-		if cache == nil {
+		if cache == "" {
 			t.Fatal("Expected cache hit, got cache miss")
 		}
 
 		// データの検証
-		if len(cache) != len(embedding) {
-			t.Errorf("Expected embedding length %d, got %d", len(embedding), len(cache))
-		}
-		for i := range embedding {
-			if cache[i] != embedding[i] {
-				t.Errorf("Embedding mismatch at index %d: expected %f, got %f",
-					i, embedding[i], cache[i])
-			}
+		if cache != embedding {
+			t.Errorf("Expected embedding %v, got %v", embedding, cache)
 		}
 	})
 }
@@ -722,22 +699,18 @@ func testGarbageCollection(t *testing.T, db *DB) {
 	}
 
 	model := "test-model"
-	embedding := []float32{0.1,
-		0.2,
-		0.3}
+	dimension := 0
+	embedding := testhelper.Base64Dummy1
 	baseTime := time.Now().UTC()
 	oldTime := baseTime.Add(-1 * time.Hour)
 
 	// 古いエントリを作成
 	for i := 0; i < 5; i++ {
 		hash := fmt.Sprintf("old_hash%d", i)
-		embeddingData := encodeEmbedding([]float32{0.1,
-			0.2,
-			0.3})
 		_, err := db.Exec(db.dialect.ConvertPlaceholders(`
 			INSERT INTO embeddings (input_hash, model, embedding_data, created_at, last_accessed_at)
 			VALUES ($1, $2, $3, $4, $5)
-		`), hash, model, embeddingData, oldTime, oldTime)
+		`), hash, model, embedding, oldTime, oldTime)
 		if err != nil {
 			t.Fatalf("Failed to create old entry: %v", err)
 		}
@@ -746,7 +719,7 @@ func testGarbageCollection(t *testing.T, db *DB) {
 	// 新しいエントリを作成
 	for i := 0; i < 5; i++ {
 		hash := fmt.Sprintf("new_hash%d", i)
-		if err := db.StoreEmbedding(hash, model, embedding); err != nil {
+		if err := db.StoreEmbedding(hash, model, dimension, embedding); err != nil {
 			t.Fatalf("Failed to store embedding: %v", err)
 		}
 	}
@@ -841,20 +814,18 @@ func testIDRangeDeletion(t *testing.T, db *DB) {
 	}
 
 	model := "test-model"
-	embedding := []float32{0.1,
-		0.2,
-		0.3}
+	dimension := 0
+	embedding := testhelper.Base64Dummy1
 	baseTime := time.Now().UTC()
 	oldTime := baseTime.Add(-1 * time.Hour)
 
 	// まず古いエントリを作成（1時間前）
 	for i := 0; i < 5; i++ {
 		hash := fmt.Sprintf("old_hash%d", i)
-		embeddingData := encodeEmbedding(embedding)
 		_, err := db.Exec(db.dialect.ConvertPlaceholders(`
 			INSERT INTO embeddings (input_hash, model, embedding_data, created_at, last_accessed_at)
 			VALUES ($1, $2, $3, $4, $5)
-		`), hash, model, embeddingData, oldTime, oldTime)
+		`), hash, model, embedding, oldTime, oldTime)
 		if err != nil {
 			t.Fatalf("Failed to create old entry: %v", err)
 		}
@@ -863,7 +834,7 @@ func testIDRangeDeletion(t *testing.T, db *DB) {
 	// 次に新しいエントリを作成（現在時刻）
 	for i := 5; i < 10; i++ {
 		hash := fmt.Sprintf("new_hash%d", i)
-		if err := db.StoreEmbedding(hash, model, embedding); err != nil {
+		if err := db.StoreEmbedding(hash, model, dimension, embedding); err != nil {
 			t.Fatalf("Failed to store embedding: %v", err)
 		}
 	}
@@ -922,14 +893,6 @@ func testBatchDeletionWithSleep(t *testing.T, db *DB) {
 }
 
 // ヘルパー関数を追加
-func encodeEmbedding(embedding []float32) []byte {
-	buf := new(bytes.Buffer)
-	if err := binary.Write(buf, binary.LittleEndian, embedding); err != nil {
-		panic(fmt.Sprintf("failed to encode embedding: %v", err))
-	}
-	return buf.Bytes()
-}
-
 func TestGetMaxID(t *testing.T) {
 	// PostgreSQL接続情報を環境変数から取得
 	postgresDSN := os.Getenv("TEST_POSTGRES_DSN")
@@ -979,12 +942,11 @@ func TestGetMaxID(t *testing.T) {
 			})
 
 			// テストデータを挿入
-			embedding := []float32{0.1,
-				0.2,
-				0.3}
+			dimension := 0
+			embedding := testhelper.Base64Dummy1
 			for i := 0; i < 5; i++ {
 				hash := fmt.Sprintf("hash%d", i)
-				if err := db.StoreEmbedding(hash, "test-model", embedding); err != nil {
+				if err := db.StoreEmbedding(hash, "test-model", dimension, embedding); err != nil {
 					t.Fatalf("Failed to store embedding: %v", err)
 				}
 			}
