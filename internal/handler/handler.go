@@ -57,93 +57,95 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx = context.WithValue(ctx, "request_id", requestID)
 	r = r.WithContext(ctx)
 
-	result := &requestResult{
-		path:   r.URL.Path,
-		method: r.Method,
-	}
-	defer func() {
-		// リクエスト完了時に1つのログエントリを出力
-		logger := slog.With(
-			"request_id", requestID,
-			"path", result.path,
-			"method", result.method,
-			"status", result.status,
-		)
+	err := h.handleRequest(w, r)
 
-		// 成功時のみトークン使用量を記録
-		attrs := []any{}
-		if result.status == http.StatusOK {
+	// ログ出力用の属性を準備
+	attrs := []any{
+		"request_id", requestID,
+		"path", r.URL.Path,
+		"method", r.Method,
+	}
+
+	if err == nil {
+		// 成功時
+		attrs = append(attrs, "status", http.StatusOK)
+		slog.Info("request completed", attrs...)
+		return
+	}
+
+	// エラー時
+	if handlerErr, ok := err.(*HandlerError); ok {
+		attrs = append(attrs, "status", handlerErr.Status)
+
+		// トークン使用量があれば記録
+		if handlerErr.PromptTokens > 0 {
 			attrs = append(attrs,
-				"prompt_tokens", result.promptTokens,
-				"total_tokens", result.totalTokens,
+				"prompt_tokens", handlerErr.PromptTokens,
+				"total_tokens", handlerErr.TotalTokens,
 			)
 		}
 
-		// 5xx系エラーの場合のみエラー詳細を記録
-		if result.status >= 500 && result.err != nil {
-			attrs = append(attrs, "error", result.err.Error())
-		}
-
-		// 5xx系エラーの場合はエラーレベル、それ以外は情報レベル
-		if result.status >= 500 {
-			logger.Error("request completed", attrs...)
+		// 5xx系エラーの場合のみ詳細なエラー情報を記録
+		if handlerErr.Status >= 500 {
+			attrs = append(attrs, "error", handlerErr.Error())
+			slog.Error("request completed", attrs...)
 		} else {
-			logger.Info("request completed", attrs...)
+			slog.Info("request completed", attrs...)
 		}
-	}()
 
-	if err := h.handleRequest(w, r, result); err != nil && result.status >= 500 {
-		slog.Debug("request processing error",
-			"request_id", requestID,
-			"error", err,
+		handlerErr.WriteResponse(w)
+	} else {
+		// 予期せぬエラー
+		attrs = append(attrs,
+			"status", http.StatusInternalServerError,
+			"error", err.Error(),
 		)
+		slog.Error("unexpected error", attrs...)
+		writeError(w, http.StatusInternalServerError, "Internal server error", "internal_error")
 	}
 }
 
-type requestResult struct {
-	path         string
-	method       string
-	status       int
-	err          error
-	promptTokens int
-	totalTokens  int
-}
-
-func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request, result *requestResult) error {
+func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request) error {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		result.status = http.StatusBadRequest
-		result.err = fmt.Errorf("failed to read request body: %w", err)
-		writeError(w, result.status, "Failed to read request body", "invalid_request_error")
-		return result.err
+		return NewHandlerError(
+			http.StatusBadRequest,
+			"Failed to read request body",
+			"invalid_request_error",
+			err,
+		)
 	}
 	if h.debugBody {
 		slog.Debug("request payload", "payload", string(body))
 	}
 
-	if err := h.validateRequest(r, result, w); err != nil {
+	if err := h.validateRequest(r); err != nil {
 		return err
 	}
 
 	var req upstream.EmbeddingRequest
 	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&req); err != nil {
-		result.status = http.StatusBadRequest
-		result.err = fmt.Errorf("invalid json: %w", err)
-		writeError(w, result.status, "Invalid JSON payload: "+err.Error(), "invalid_request_error")
-		return result.err
+		return NewHandlerError(
+			http.StatusBadRequest,
+			"Invalid JSON payload: "+err.Error(),
+			"invalid_request_error",
+			err,
+		)
 	}
 
-	if err := h.validateEmbeddingRequest(&req, result, w); err != nil {
+	if err := h.validateEmbeddingRequest(&req); err != nil {
 		return err
 	}
 
 	// 入力をハッシュ化してキャッシュを確認
 	inputs, err := processInput(req.Input)
 	if err != nil {
-		result.status = http.StatusBadRequest
-		result.err = fmt.Errorf("invalid input: %w", err)
-		writeError(w, result.status, "Invalid input: "+err.Error(), "invalid_request_error")
-		return result.err
+		return NewHandlerError(
+			http.StatusBadRequest,
+			"Invalid input: "+err.Error(),
+			"invalid_request_error",
+			err,
+		)
 	}
 
 	// レスポンスの準備
@@ -165,10 +167,12 @@ func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request, result *
 
 		cache, err := h.db.GetEmbedding(inputHashStr, req.Model)
 		if err != nil {
-			result.status = http.StatusInternalServerError
-			result.err = fmt.Errorf("failed to check cache: %w", err)
-			writeError(w, result.status, "Failed to check cache", "internal_error")
-			return result.err
+			return NewHandlerError(
+				http.StatusInternalServerError,
+				"Failed to check cache",
+				"internal_error",
+				err,
+			)
 		}
 
 		if cache != nil {
@@ -199,27 +203,33 @@ func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request, result *
 		missedResp, err := h.upstream.CreateEmbedding(&missedReq, r.Header.Get("Authorization"))
 		if err != nil {
 			if ue, ok := err.(*upstream.UpstreamError); ok {
-				result.status = ue.StatusCode
-				result.err = fmt.Errorf("upstream error: %w", err)
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(ue.StatusCode)
-				json.NewEncoder(w).Encode(ue.Response)
-				return result.err
+				return NewHandlerErrorWithTokens(
+					ue.StatusCode,
+					"Failed to reach upstream API: "+err.Error(),
+					"upstream_error",
+					err,
+					ue.Usage.PromptTokens,
+					ue.Usage.TotalTokens,
+				)
 			}
-			result.status = http.StatusBadGateway
-			result.err = fmt.Errorf("upstream error: %w", err)
-			writeError(w, result.status, "Failed to reach upstream API: "+err.Error(), "upstream_error")
-			return result.err
+			return NewHandlerError(
+				http.StatusBadGateway,
+				"Failed to reach upstream API: "+err.Error(),
+				"upstream_error",
+				err,
+			)
 		}
 
 		// APIレスポンスをキャッシュに保存し、レスポンスに組み込む
 		for i, data := range missedResp.Data {
 			embedding, ok := convertToFloat32Slice(data.Embedding)
 			if !ok {
-				result.status = http.StatusInternalServerError
-				result.err = fmt.Errorf("unexpected embedding type from upstream at index %d", i)
-				writeError(w, result.status, "Unexpected embedding type from upstream", "internal_error")
-				return result.err
+				return NewHandlerError(
+					http.StatusInternalServerError,
+					"Unexpected embedding type from upstream",
+					"internal_error",
+					fmt.Errorf("unexpected embedding type from upstream at index %d", i),
+				)
 			}
 
 			// キャッシュに保存
@@ -245,8 +255,6 @@ func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request, result *
 
 		// 使用量を記録
 		resp.Usage = missedResp.Usage
-		result.promptTokens = missedResp.Usage.PromptTokens
-		result.totalTokens = missedResp.Usage.TotalTokens
 	}
 
 	// base64エンコーディングが要求された場合の処理
@@ -259,77 +267,90 @@ func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request, result *
 		}
 	}
 
-	// 成功時のメタデータを記録
-	result.status = http.StatusOK
-
 	// レスポンスを返す
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	return json.NewEncoder(w).Encode(resp)
 }
 
-func (h *Handler) validateRequest(r *http.Request, result *requestResult, w http.ResponseWriter) error {
+func (h *Handler) validateRequest(r *http.Request) error {
 	if r.URL.Path != "/v1/embeddings" {
-		result.status = http.StatusNotFound
-		result.err = fmt.Errorf("not found")
-		writeError(w, result.status, "Not found", "invalid_request_error")
-		return fmt.Errorf("not found")
+		return NewHandlerError(
+			http.StatusNotFound,
+			"Not found",
+			"invalid_request_error",
+			fmt.Errorf("not found"),
+		)
 	}
 
 	if r.Method != http.MethodPost {
-		result.status = http.StatusMethodNotAllowed
-		result.err = fmt.Errorf("method not allowed: %s", r.Method)
-		writeError(w, result.status, "Method not allowed. Please use POST.", "invalid_request_error")
-		return fmt.Errorf("method not allowed: %s", r.Method)
+		return NewHandlerError(
+			http.StatusMethodNotAllowed,
+			"Method not allowed. Please use POST.",
+			"invalid_request_error",
+			fmt.Errorf("method not allowed: %s", r.Method),
+		)
 	}
 
 	// Authorization headerのチェック
 	authHeader := r.Header.Get("Authorization")
 	if !strings.HasPrefix(authHeader, "Bearer ") {
-		result.status = http.StatusUnauthorized
-		result.err = fmt.Errorf("invalid auth header format")
-		writeError(w, result.status, "Missing or invalid Authorization header. Expected format: 'Bearer YOUR-API-KEY'", "invalid_request_error")
-		return fmt.Errorf("invalid auth header format")
+		return NewHandlerError(
+			http.StatusUnauthorized,
+			"Missing or invalid Authorization header. Expected format: 'Bearer YOUR-API-KEY'",
+			"invalid_request_error",
+			fmt.Errorf("invalid auth header format"),
+		)
 	}
 
 	token := strings.TrimPrefix(authHeader, "Bearer ")
 	if token == "" {
-		result.status = http.StatusUnauthorized
-		result.err = fmt.Errorf("empty api key")
-		writeError(w, result.status, "API key is required", "invalid_request_error")
-		return fmt.Errorf("empty api key")
+		return NewHandlerError(
+			http.StatusUnauthorized,
+			"API key is required",
+			"invalid_request_error",
+			fmt.Errorf("empty api key"),
+		)
 	}
 
 	if h.apiKeyRegexp != nil && !h.apiKeyRegexp.MatchString(token) {
-		result.status = http.StatusUnauthorized
-		result.err = fmt.Errorf("invalid api key format")
-		writeError(w, result.status, "Invalid API key format", "invalid_request_error")
-		return fmt.Errorf("invalid api key format")
+		return NewHandlerError(
+			http.StatusUnauthorized,
+			"Invalid API key format",
+			"invalid_request_error",
+			fmt.Errorf("invalid api key format"),
+		)
 	}
 
 	return nil
 }
 
-func (h *Handler) validateEmbeddingRequest(req *upstream.EmbeddingRequest, result *requestResult, w http.ResponseWriter) error {
+func (h *Handler) validateEmbeddingRequest(req *upstream.EmbeddingRequest) error {
 	if req.Input == nil || req.Model == "" {
-		result.status = http.StatusBadRequest
-		result.err = fmt.Errorf("missing required fields")
-		writeError(w, result.status, "Missing required fields: 'input' and 'model' must not be empty", "invalid_request_error")
-		return result.err
+		return NewHandlerError(
+			http.StatusBadRequest,
+			"Missing required fields: 'input' and 'model' must not be empty",
+			"invalid_request_error",
+			fmt.Errorf("missing required fields"),
+		)
 	}
 
 	if !slices.Contains(h.allowedModels, req.Model) {
-		result.status = http.StatusBadRequest
-		result.err = fmt.Errorf("unsupported model: %s", req.Model)
-		writeError(w, result.status, "Unsupported model: "+req.Model, "invalid_request_error")
-		return result.err
+		return NewHandlerError(
+			http.StatusBadRequest,
+			"Unsupported model: "+req.Model,
+			"invalid_request_error",
+			fmt.Errorf("unsupported model: %s", req.Model),
+		)
 	}
 
 	if req.EncodingFormat != "" && req.EncodingFormat != "float" && req.EncodingFormat != "base64" {
-		result.status = http.StatusBadRequest
-		result.err = fmt.Errorf("invalid encoding format: %s", req.EncodingFormat)
-		writeError(w, result.status, "Invalid encoding_format: must be either 'float' or 'base64'", "invalid_request_error")
-		return result.err
+		return NewHandlerError(
+			http.StatusBadRequest,
+			"Invalid encoding_format: must be either 'float' or 'base64'",
+			"invalid_request_error",
+			fmt.Errorf("invalid encoding format: %s", req.EncodingFormat),
+		)
 	}
 
 	return nil

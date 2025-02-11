@@ -36,6 +36,7 @@ type Usage struct {
 type UpstreamError struct {
 	StatusCode int
 	Response   map[string]interface{}
+	Usage      Usage
 }
 
 func (e *UpstreamError) Error() string {
