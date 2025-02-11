@@ -9,8 +9,8 @@ RSpec.describe "V1::Embeddings", type: :request do
       before do
         build_stub_request(
           model: "text-embedding-ada-002",
-          input: "Hello, world!",
-          vectors: [0.0023064255, -0.009327292, 0.015954146],
+          input: ["Hello, world!"],
+          base64s: ["AAAAPgAAgD4AAAA/"],
         )
       end
 
@@ -25,6 +25,9 @@ RSpec.describe "V1::Embeddings", type: :request do
           }
         }.to_json
       end
+
+      # TODO: validate response structure
+      # expect(response).to be_successful
     end
 
     context "input is string array" do
@@ -32,10 +35,7 @@ RSpec.describe "V1::Embeddings", type: :request do
         build_stub_request(
           model: "text-embedding-ada-002",
           input: ["Hello, world!", "Goodbye, world!"],
-          vectors: [
-            [0.0023064255, -0.009327292, 0.015954146],
-            [0.0023064255, -0.009327292, 0.015954146],
-          ]
+          base64s: ["AAAAPgAAgD4AAAA/", "AADAPgAAQD8AAGA/"],
         )
       end
       
@@ -56,10 +56,8 @@ RSpec.describe "V1::Embeddings", type: :request do
       before do
         build_stub_request(
           model: "text-embedding-ada-002",
-          input: [1, 2, 3],
-          vectors: [
-            [0.0023064255, -0.009327292, 0.015954146],
-          ]
+          input: [[1, 2, 3]],
+          base64s: ["AAAAPgAAgD4AAAA/"],
         )
       end
       
@@ -81,10 +79,7 @@ RSpec.describe "V1::Embeddings", type: :request do
         build_stub_request(
           model: "text-embedding-ada-002",
           input: [[1, 2], [3, 4]],
-          vectors: [
-            [0.0023064255, -0.009327292, 0.015954146],
-            [0.0023064255, -0.009327292, 0.015954146],
-          ]
+          base64s: ["AAAAPgAAgD4AAAA/", "AADAPgAAQD8AAGA/"],
         )
       end
       
@@ -105,7 +100,7 @@ RSpec.describe "V1::Embeddings", type: :request do
     end
   end
 
-  def build_stub_request(model:, input:, vectors:)
+  def build_stub_request(model:, input:, base64s:)
     stub_request(:post, "https://api.openai.com/v1/embeddings")
       .with(
         headers: {
@@ -118,13 +113,14 @@ RSpec.describe "V1::Embeddings", type: :request do
         body: {
           model: model,
           input: input,
+          encoding_format: "base64",
         }.to_json
       )
       .to_return(status: 200, body: {
         object: "list",
-        data: vectors.map.with_index { |vector, index| {
+        data: base64s.map.with_index { |base64, index| {
           object: "embedding",
-          embedding: vector,
+          embedding: base64,
           index: index
         } },
         model: model,
