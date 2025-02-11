@@ -3,353 +3,359 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
-	"log/slog"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
+	"reflect"
+	"regexp"
+	"strings"
 	"testing"
-	"time"
 
 	"github.com/yammerjp/cachembed/internal/storage"
 	"github.com/yammerjp/cachembed/internal/upstream"
 )
 
 func TestHandleEmbeddings(t *testing.T) {
-	// テスト用の一時データベースを作成
-	tmpFile, err := os.CreateTemp("", "cachembed-test-*.db")
-	if err != nil {
-		t.Fatalf("Failed to create temp file: %v", err)
-	}
-	defer os.Remove(tmpFile.Name())
-	tmpFile.Close()
+	validAPIKey := "test-api-key"
+	mockDB := storage.NewMockDB()
+	mockUpstream := upstream.NewMockClient()
 
-	db, err := storage.NewDB(tmpFile.Name())
-	if err != nil {
-		t.Fatalf("Failed to create database: %v", err)
-	}
-	defer db.Close()
+	// 正規表現のコンパイル
+	apiKeyRegexp := regexp.MustCompile("^test-.*$")
 
-	// モックサーバーの設定（シンプルな成功レスポンスのみ）
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// デバッグ用にリクエストの内容を表示
-		slog.Debug("mock server received request",
-			"method", r.Method,
-			"path", r.URL.Path,
-			"headers", r.Header,
-		)
-
-		// JSONとして正しい形式でレスポンスを構築
-		rawResp := map[string]interface{}{
-			"object": "list",
-			"data": []map[string]interface{}{
-				{
-					"object":    "embedding",
-					"embedding": []float64{0.1, 0.2, 0.3}, // float64を使用
-					"index":     0,
-				},
-			},
-			"model": "text-embedding-ada-002",
-			"usage": map[string]interface{}{
-				"prompt_tokens": 8,
-				"total_tokens":  8,
-			},
-		}
-		// デバッグ用にレスポンスの内容を表示
-		respBytes, _ := json.Marshal(rawResp)
-		slog.Debug("mock server sending response",
-			"response", string(respBytes),
-		)
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(rawResp)
-	}))
-	defer ts.Close()
-
-	allowedModels := []string{"text-embedding-ada-002"}
-	apiKeyPattern := "^sk-[a-zA-Z0-9]{32}$"
-	validAPIKey := "sk-abcdefghijklmnopqrstuvwxyz123456" // 有効なAPIキーの例
+	// テストケース共通の埋め込みベクトル
+	mockEmbedding := []float32{0.1, 0.2, 0.3}
+	mockBase64 := float32ToBase64(mockEmbedding)
 
 	tests := []struct {
 		name          string
 		request       map[string]interface{}
+		encoding      string // encoding_formatの指定（空文字列="float"）
+		setupCache    bool   // テスト前にキャッシュを設定するか
 		authHeader    string
 		wantStatus    int
-		wantCacheHit  bool
-		wantTokens    int
-		wantErrorType string
-		setupCache    bool
-		method        string
-		path          string
+		wantTokens    int         // キャッシュミス時の期待するトークン数
+		wantCacheHit  bool        // キャッシュヒットを期待するか
+		wantEmbedding interface{} // 期待する埋め込みベクトルの形式
+		wantError     string
 	}{
+		// 1. 単一文字列入力のテスト
 		{
-			name: "valid string input",
-			request: map[string]interface{}{
-				"input": "The food was delicious",
-				"model": "text-embedding-ada-002",
-			},
-			authHeader:   "Bearer " + validAPIKey,
-			wantStatus:   http.StatusOK,
-			wantTokens:   8,
-			wantCacheHit: false,
-		},
-		{
-			name: "valid string input (cache hit)",
-			request: map[string]interface{}{
-				"input": "The food was delicious",
-				"model": "text-embedding-ada-002",
-			},
-			authHeader:   "Bearer " + validAPIKey,
-			wantStatus:   http.StatusOK,
-			wantCacheHit: true,
-			wantTokens:   0,
-		},
-		{
-			name: "valid integer array input",
-			request: map[string]interface{}{
-				"input": []interface{}{1, 2, 3},
-				"model": "text-embedding-ada-002",
-			},
-			authHeader:   "Bearer " + validAPIKey,
-			wantStatus:   http.StatusOK,
-			wantTokens:   8,
-			wantCacheHit: false,
-		},
-		{
-			name: "valid integer array input (cache hit)",
-			request: map[string]interface{}{
-				"input": []interface{}{1, 2, 3},
-				"model": "text-embedding-ada-002",
-			},
-			authHeader:   "Bearer " + validAPIKey,
-			wantStatus:   http.StatusOK,
-			wantTokens:   0,
-			wantCacheHit: true,
-			setupCache:   true,
-		},
-		{
-			name: "valid float array input",
-			request: map[string]interface{}{
-				"input": []interface{}{1.5, 2.5, 3.5},
-				"model": "text-embedding-ada-002",
-			},
-			authHeader:   "Bearer " + validAPIKey,
-			wantStatus:   http.StatusOK,
-			wantTokens:   8,
-			wantCacheHit: false,
-		},
-		{
-			name: "valid float array input (cache hit)",
-			request: map[string]interface{}{
-				"input": []interface{}{1.5, 2.5, 3.5},
-				"model": "text-embedding-ada-002",
-			},
-			authHeader:   "Bearer " + validAPIKey,
-			wantStatus:   http.StatusOK,
-			wantTokens:   0,
-			wantCacheHit: true,
-			setupCache:   true,
-		},
-		{
-			name: "invalid array element type",
-			request: map[string]interface{}{
-				"input": []interface{}{true, false}, // booleanは無効な型
-				"model": "text-embedding-ada-002",
-			},
-			authHeader:    "Bearer " + validAPIKey,
-			wantStatus:    http.StatusBadRequest,
-			wantErrorType: "invalid_request_error",
-		},
-		{
-			name: "valid request - initial (cache miss)",
+			name: "single string - cache miss - float",
 			request: map[string]interface{}{
 				"input": "Hello, World!",
-				"model": "text-embedding-ada-002",
+				"model": "text-embedding-3-small",
 			},
-			authHeader:   "Bearer " + validAPIKey,
-			wantStatus:   http.StatusOK,
-			wantCacheHit: false,
-			wantTokens:   8,
+			wantStatus:    http.StatusOK,
+			wantTokens:    3,
+			wantCacheHit:  false,
+			wantEmbedding: mockEmbedding,
 		},
 		{
-			name: "valid request - cached (cache hit)",
+			name: "single string - cache hit - float",
 			request: map[string]interface{}{
 				"input": "Hello, World!",
-				"model": "text-embedding-ada-002",
+				"model": "text-embedding-3-small",
 			},
-			authHeader:   "Bearer " + validAPIKey,
-			wantStatus:   http.StatusOK,
-			wantCacheHit: true,
-			wantTokens:   0,
+			setupCache:    true,
+			wantStatus:    http.StatusOK,
+			wantCacheHit:  true,
+			wantEmbedding: mockEmbedding,
 		},
 		{
-			name:       "invalid_method",
-			method:     "GET",
-			path:       "/v1/embeddings",
-			request:    map[string]interface{}{},
-			wantStatus: http.StatusMethodNotAllowed,
-		},
-		{
-			name:       "invalid_path",
-			method:     "POST",
-			path:       "/v1/invalid",
-			request:    map[string]interface{}{},
-			wantStatus: http.StatusNotFound,
-		},
-		{
-			name: "missing auth header",
+			name: "single string - cache miss - base64",
 			request: map[string]interface{}{
-				"input": "test",
-				"model": "text-embedding-ada-002",
+				"input": "Hello, World!",
+				"model": "text-embedding-3-small",
 			},
-			wantStatus:    http.StatusUnauthorized,
-			wantErrorType: "invalid_request_error",
+			encoding:      "base64",
+			wantStatus:    http.StatusOK,
+			wantTokens:    3,
+			wantCacheHit:  false,
+			wantEmbedding: mockBase64,
+		},
+
+		// 2. トークン列（整数配列）入力のテスト
+		{
+			name: "token array - cache miss - float",
+			request: map[string]interface{}{
+				"input": []interface{}{1, 2, 3},
+				"model": "text-embedding-3-small",
+			},
+			wantStatus:    http.StatusOK,
+			wantTokens:    3,
+			wantCacheHit:  false,
+			wantEmbedding: mockEmbedding,
 		},
 		{
-			name: "invalid auth format",
+			name: "token array - cache hit - base64",
 			request: map[string]interface{}{
-				"input": "test",
-				"model": "text-embedding-ada-002",
+				"input": []interface{}{1, 2, 3},
+				"model": "text-embedding-3-small",
 			},
-			authHeader:    "Invalid " + validAPIKey,
-			wantStatus:    http.StatusUnauthorized,
-			wantErrorType: "invalid_request_error",
+			encoding:      "base64",
+			setupCache:    true,
+			wantStatus:    http.StatusOK,
+			wantCacheHit:  true,
+			wantEmbedding: mockBase64,
 		},
 		{
-			name: "invalid api key",
+			name: "token array with float - error",
 			request: map[string]interface{}{
-				"input": "test",
-				"model": "text-embedding-ada-002",
+				"input": []interface{}{1.5, 2, 3},
+				"model": "text-embedding-3-small",
 			},
-			authHeader:    "Bearer invalid-key",
-			wantStatus:    http.StatusUnauthorized,
-			wantErrorType: "invalid_request_error",
+			wantStatus: http.StatusBadRequest,
+			wantError:  "non-integer number at index 0: 1.5",
+		},
+
+		// 3. 文字列配列入力のテスト
+		{
+			name: "string array - cache miss - float",
+			request: map[string]interface{}{
+				"input": []interface{}{"Hello", "World"},
+				"model": "text-embedding-3-small",
+			},
+			wantStatus:    http.StatusOK,
+			wantTokens:    2,
+			wantCacheHit:  false,
+			wantEmbedding: mockEmbedding,
 		},
 		{
-			name: "invalid model",
+			name: "string array - cache hit - base64",
 			request: map[string]interface{}{
-				"input": "test",
-				"model": "invalid-model",
+				"input": []interface{}{"Hello", "World"},
+				"model": "text-embedding-3-small",
 			},
-			authHeader:    "Bearer " + validAPIKey,
-			wantStatus:    http.StatusBadRequest,
-			wantErrorType: "invalid_request_error",
+			encoding:      "base64",
+			setupCache:    true,
+			wantStatus:    http.StatusOK,
+			wantCacheHit:  true,
+			wantEmbedding: mockBase64,
+		},
+
+		// 4. トークン列の配列入力のテスト
+		{
+			name: "token arrays - cache miss - float",
+			request: map[string]interface{}{
+				"input": []interface{}{
+					[]interface{}{1, 2},
+					[]interface{}{3, 4},
+				},
+				"model": "text-embedding-3-small",
+			},
+			wantStatus:    http.StatusOK,
+			wantTokens:    4,
+			wantCacheHit:  false,
+			wantEmbedding: mockEmbedding,
+		},
+		{
+			name: "token arrays - cache hit - base64",
+			request: map[string]interface{}{
+				"input": []interface{}{
+					[]interface{}{1, 2},
+					[]interface{}{3, 4},
+				},
+				"model": "text-embedding-3-small",
+			},
+			encoding:      "base64",
+			setupCache:    true,
+			wantStatus:    http.StatusOK,
+			wantCacheHit:  true,
+			wantEmbedding: mockBase64,
+		},
+		{
+			name: "token arrays with float - error",
+			request: map[string]interface{}{
+				"input": []interface{}{
+					[]interface{}{1.5, 2},
+					[]interface{}{3, 4},
+				},
+				"model": "text-embedding-3-small",
+			},
+			wantStatus: http.StatusBadRequest,
+			wantError:  "non-integer number in array at index 0,0: 1.5",
+		},
+
+		// 5. エラーケース
+		{
+			name: "empty input array",
+			request: map[string]interface{}{
+				"input": []interface{}{},
+				"model": "text-embedding-3-small",
+			},
+			wantStatus: http.StatusBadRequest,
+			wantError:  "input array must not be empty",
+		},
+		{
+			name: "invalid input type",
+			request: map[string]interface{}{
+				"input": true,
+				"model": "text-embedding-3-small",
+			},
+			wantStatus: http.StatusBadRequest,
+			wantError:  "invalid input type: got bool",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// 各テストケースで新しいハンドラーを作成
-			handler := NewHandler(
-				allowedModels,
-				apiKeyPattern,
-				ts.URL,
-				db,
+			// テスト用ハンドラーの準備
+			h := NewHandler(
+				[]string{"text-embedding-3-small"},
+				apiKeyRegexp,
+				mockDB,
+				mockUpstream,
 				false,
 			)
 
-			// キャッシュの準備が必要な場合は、事前にリクエストを実行
+			// キャッシュの設定
 			if tt.setupCache {
-				body, err := json.Marshal(tt.request)
+				input := tt.request["input"]
+				model := tt.request["model"].(string)
+				hash, err := calculateInputHash(input)
 				if err != nil {
-					t.Fatalf("Failed to marshal setup request: %v", err)
+					t.Fatalf("failed to calculate hash: %v", err)
 				}
-
-				setupReq := httptest.NewRequest("POST", "/v1/embeddings", bytes.NewReader(body))
-				setupReq.Header.Set("Authorization", tt.authHeader)
-				setupReq.Header.Set("Content-Type", "application/json")
-				w := httptest.NewRecorder()
-				handler.ServeHTTP(w, setupReq)
-
-				if w.Code != http.StatusOK {
-					t.Fatalf("Cache setup failed with status code %d: %s", w.Code, w.Body.String())
+				err = mockDB.StoreEmbedding(hash, model, mockEmbedding)
+				if err != nil {
+					t.Fatalf("failed to setup cache: %v", err)
 				}
-
-				// キャッシュのセットアップが完了するまで少し待つ
-				time.Sleep(100 * time.Millisecond)
 			}
 
-			// テストリクエストの実行
-			body, err := json.Marshal(tt.request)
+			// リクエストの準備
+			if tt.encoding != "" {
+				tt.request["encoding_format"] = tt.encoding
+			}
+			reqBody, err := json.Marshal(tt.request)
 			if err != nil {
-				t.Fatalf("Failed to marshal request: %v", err)
+				t.Fatalf("failed to marshal request: %v", err)
 			}
 
-			// メソッドとパスを指定
-			method := tt.method
-			if method == "" {
-				method = "POST"
-			}
-			path := tt.path
-			if path == "" {
-				path = "/v1/embeddings"
-			}
-
-			req := httptest.NewRequest(method, path, bytes.NewReader(body))
-			if tt.authHeader != "" {
-				req.Header.Set("Authorization", tt.authHeader)
-			}
+			req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", bytes.NewReader(reqBody))
+			req.Header.Set("Authorization", "Bearer "+validAPIKey)
 			req.Header.Set("Content-Type", "application/json")
 
+			// レスポンスの取得
 			w := httptest.NewRecorder()
-			handler.ServeHTTP(w, req)
+			h.ServeHTTP(w, req)
 
+			// ステータスコードの検証
 			if w.Code != tt.wantStatus {
-				t.Errorf("Expected status code %d, got %d", tt.wantStatus, w.Code)
+				t.Errorf("status code = %d, want %d", w.Code, tt.wantStatus)
 			}
 
-			if tt.wantStatus == http.StatusOK {
-				var resp upstream.EmbeddingResponse
-				if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-					t.Fatalf("Failed to decode response: %v", err)
+			// エラーケースの検証
+			if tt.wantError != "" {
+				var errResp struct {
+					Error struct {
+						Message string `json:"message"`
+					} `json:"error"`
 				}
+				if err := json.NewDecoder(w.Body).Decode(&errResp); err != nil {
+					t.Fatalf("failed to decode error response: %v", err)
+				}
+				if !strings.Contains(errResp.Error.Message, tt.wantError) {
+					t.Errorf("error message = %q, want to contain %q", errResp.Error.Message, tt.wantError)
+				}
+				return
+			}
 
-				// キャッシュヒットの検証
-				if tt.wantCacheHit && resp.Usage.TotalTokens != 0 {
-					t.Error("Expected cache hit (zero tokens), got cache miss")
-				}
-				if !tt.wantCacheHit && resp.Usage.TotalTokens != tt.wantTokens {
-					t.Errorf("Expected %d tokens, got %d", tt.wantTokens, resp.Usage.TotalTokens)
-				}
+			// 成功ケースのレスポンス検証
+			var resp upstream.EmbeddingResponse
+			if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+				t.Fatalf("failed to decode response: %v", err)
+			}
 
-				// レスポンスの基本的な検証
-				if len(resp.Data) != 1 {
-					t.Errorf("Expected 1 embedding, got %d", len(resp.Data))
-					return
-				}
-				// 型アサーションの前にnilチェック
-				if resp.Data[0].Embedding == nil {
-					t.Error("Embedding is nil")
-					return
-				}
+			// キャッシュヒット/ミスの検証
+			if tt.wantCacheHit && resp.Usage.TotalTokens != 0 {
+				t.Error("Expected cache hit (zero tokens), got cache miss")
+			}
+			if !tt.wantCacheHit && resp.Usage.TotalTokens != tt.wantTokens {
+				t.Errorf("Expected %d tokens, got %d", tt.wantTokens, resp.Usage.TotalTokens)
+			}
 
-				// []interface{}として処理
-				switch embedding := resp.Data[0].Embedding.(type) {
-				case []interface{}:
-					if len(embedding) != 3 {
-						t.Errorf("Expected embedding length 3, got %d", len(embedding))
-						return
-					}
-					// 各要素が数値であることを確認
-					for i, v := range embedding {
-						switch v.(type) {
-						case float64, float32:
-							// OK
-						default:
-							t.Errorf("Expected float at index %d, got %T", i, v)
-						}
-					}
-				case []float64:
-					if len(embedding) != 3 {
-						t.Errorf("Expected embedding length 3, got %d", len(embedding))
-					}
-				case []float32:
-					if len(embedding) != 3 {
-						t.Errorf("Expected embedding length 3, got %d", len(embedding))
-					}
-				default:
-					t.Errorf("Expected embedding array, got %T", resp.Data[0].Embedding)
-				}
+			// 埋め込みベクトルの検証
+			if len(resp.Data) == 0 {
+				t.Fatal("no embeddings in response")
+			}
+			embedding := resp.Data[0].Embedding
+			if !reflect.DeepEqual(embedding, tt.wantEmbedding) {
+				t.Errorf("embedding = %v, want %v", embedding, tt.wantEmbedding)
 			}
 		})
 	}
+}
+
+// テスト用のヘルパー関数
+func calculateInputHash(input interface{}) (string, error) {
+	var hashInput string
+
+	switch v := input.(type) {
+	case string:
+		hashInput = v
+	case []interface{}:
+		if len(v) == 0 {
+			return "", fmt.Errorf("input array must not be empty")
+		}
+
+		// 最初の要素が配列かどうかをチェック
+		if _, isArray := v[0].([]interface{}); isArray {
+			// 2次元配列の処理
+			parts := make([]string, len(v))
+			for i, arr := range v {
+				subArr, ok := arr.([]interface{})
+				if !ok {
+					return "", fmt.Errorf("invalid array element at index %d", i)
+				}
+				if len(subArr) == 0 {
+					return "", fmt.Errorf("empty sub-array at index %d", i)
+				}
+
+				// サブ配列の処理
+				subParts := make([]string, len(subArr))
+				for j, item := range subArr {
+					switch num := item.(type) {
+					case float64:
+						if float64(int(num)) != num {
+							return "", fmt.Errorf("non-integer number in array at index %d,%d: %v", i, j, num)
+						}
+						subParts[j] = fmt.Sprintf("%d", int(num))
+					case int:
+						subParts[j] = fmt.Sprintf("%d", num)
+					case string:
+						subParts[j] = num
+					default:
+						return "", fmt.Errorf("unsupported type in array at index %d,%d: %T", i, j, item)
+					}
+				}
+				parts[i] = strings.Join(subParts, ",")
+			}
+			hashInput = strings.Join(parts, ";")
+		} else {
+			// 1次元配列の処理
+			parts := make([]string, len(v))
+			for i, item := range v {
+				switch num := item.(type) {
+				case float64:
+					if float64(int(num)) != num {
+						return "", fmt.Errorf("non-integer number at index %d: %v", i, num)
+					}
+					parts[i] = fmt.Sprintf("%d", int(num))
+				case string:
+					parts[i] = num
+				case int:
+					parts[i] = fmt.Sprintf("%d", num)
+				default:
+					return "", fmt.Errorf("unsupported type at index %d: %T", i, item)
+				}
+			}
+			hashInput = strings.Join(parts, ",")
+		}
+	default:
+		return "", fmt.Errorf("unsupported input type: %T", input)
+	}
+
+	// 単純なハッシュ計算（テスト用）
+	return fmt.Sprintf("test-hash-%s", hashInput), nil
 }

@@ -98,21 +98,11 @@ func TestCreateEmbedding(t *testing.T) {
 					if ue.StatusCode != tt.wantStatusCode {
 						t.Errorf("Wrong status code: got %v want %v", ue.StatusCode, tt.wantStatusCode)
 					}
-
-					// Response mapから正しくエラー情報を取得
-					if errMap, ok := ue.Response["error"].(map[string]interface{}); ok {
-						if errType, ok := errMap["type"].(string); ok {
-							if errType != tt.wantErrorType {
-								t.Errorf("Wrong error type: got %v want %v", errType, tt.wantErrorType)
-							}
-						} else {
-							t.Error("Error type not found in response")
-						}
-					} else {
-						t.Error("Error object not found in response")
+					if ue.ErrorInfo.Type != tt.wantErrorType {
+						t.Errorf("Wrong error type: got %v want %v", ue.ErrorInfo.Type, tt.wantErrorType)
 					}
 				} else {
-					t.Errorf("Expected upstreamError but got %T", err)
+					t.Errorf("Expected UpstreamError but got %T", err)
 				}
 				return
 			}

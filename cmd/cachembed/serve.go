@@ -5,9 +5,11 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"regexp"
 
 	"github.com/yammerjp/cachembed/internal/handler"
 	"github.com/yammerjp/cachembed/internal/storage"
+	"github.com/yammerjp/cachembed/internal/upstream"
 )
 
 func runServer(cmd ServeCmd, dsn string, debugBody bool) {
@@ -26,8 +28,28 @@ func runServer(cmd ServeCmd, dsn string, debugBody bool) {
 	}
 	defer db.Close()
 
+	// 正規表現のコンパイル
+	var apiKeyRegexp *regexp.Regexp
+	if cmd.APIKeyPattern != "" {
+		var err error
+		apiKeyRegexp, err = regexp.Compile(cmd.APIKeyPattern)
+		if err != nil {
+			slog.Error("invalid API key pattern", "error", err)
+			os.Exit(1)
+		}
+	}
+
+	// upstreamクライアントの作成
+	upstreamClient := upstream.NewClient(cmd.UpstreamURL)
+
 	// ハンドラの作成
-	handler := handler.NewHandler(cmd.AllowedModels, cmd.APIKeyPattern, cmd.UpstreamURL, db, debugBody)
+	handler := handler.NewHandler(
+		cmd.AllowedModels,
+		apiKeyRegexp,
+		db,
+		upstreamClient,
+		cmd.DebugBody,
+	)
 
 	// サーバーの起動
 	addr := fmt.Sprintf("%s:%d", cmd.Host, cmd.Port)

@@ -27,7 +27,7 @@ const (
 	`
 
 	sqlGetEmbedding = `
-	SELECT embedding_data, created_at, last_accessed_at
+	SELECT embedding_data
 	FROM embeddings 
 	WHERE input_hash = $1 AND model = $2`
 
@@ -40,8 +40,8 @@ const (
 	INSERT INTO embeddings (input_hash, model, embedding_data, created_at, last_accessed_at) 
 	VALUES ($1, $2, $3, $4, $5)
 	ON CONFLICT(input_hash, model) DO UPDATE 
-	SET embedding_data = excluded.embedding_data,
-		last_accessed_at = excluded.last_accessed_at`
+	SET embedding_data = EXCLUDED.embedding_data,
+		last_accessed_at = EXCLUDED.last_accessed_at`
 
 	sqlDeleteEntriesBefore = `
 		DELETE FROM embeddings
@@ -120,43 +120,39 @@ func (db *DB) RunMigrations() error {
 	return nil
 }
 
-func (db *DB) GetEmbedding(inputHash, model string) (*EmbeddingCache, error) {
-	var cache EmbeddingCache
-	var blobData []byte
-
-	tx, err := db.Begin()
-	if err != nil {
-		return nil, fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	query := db.dialect.ConvertPlaceholders(sqlGetEmbedding)
-	err = tx.QueryRow(query, inputHash, model).Scan(&blobData, &cache.CreatedAt, &cache.LastAccessed)
+func (db *DB) GetEmbedding(hash string, model string) ([]float32, error) {
+	var embeddingBytes []byte
+	err := db.QueryRow(
+		db.dialect.ConvertPlaceholders(sqlGetEmbedding),
+		hash,
+		model,
+	).Scan(&embeddingBytes)
 
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to get embedding: %w", err)
+		return nil, fmt.Errorf("failed to query embedding: %w", err)
 	}
 
-	now := time.Now().UTC()
-	updateQuery := db.dialect.ConvertPlaceholders(sqlUpdateLastAccessed)
-	_, err = tx.Exec(updateQuery, now, inputHash, model)
+	// バイト列をfloat32スライスに変換
+	embedding := make([]float32, len(embeddingBytes)/4)
+	if err := binary.Read(bytes.NewReader(embeddingBytes), binary.LittleEndian, embedding); err != nil {
+		return nil, fmt.Errorf("failed to decode embedding: %w", err)
+	}
+
+	// 最終アクセス時刻を更新
+	_, err = db.Exec(
+		db.dialect.ConvertPlaceholders(sqlUpdateLastAccessed),
+		time.Now().UTC(),
+		hash,
+		model,
+	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to update last_accessed_at: %w", err)
+		slog.Error("failed to update last accessed time", "error", err)
 	}
 
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("failed to commit transaction: %w", err)
-	}
-
-	cache.EmbeddingData = make([]float32, len(blobData)/4)
-	if err := binary.Read(bytes.NewReader(blobData), binary.LittleEndian, &cache.EmbeddingData); err != nil {
-		return nil, fmt.Errorf("failed to decode embedding data: %w", err)
-	}
-
-	return &cache, nil
+	return embedding, nil
 }
 
 func (db *DB) StoreEmbedding(inputHash, model string, embedding []float32) error {

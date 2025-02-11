@@ -18,7 +18,15 @@ func processInput(input interface{}) ([]string, error) {
 		isNumberArray := true
 		for _, item := range v {
 			switch item.(type) {
-			case float64, int:
+			case float64:
+				// JSONデコード時にすべての数値はfloat64として来るので、
+				// 整数値かどうかをチェック
+				f := item.(float64)
+				if f != float64(int(f)) {
+					isNumberArray = false
+					break
+				}
+			case int:
 				continue
 			default:
 				isNumberArray = false
@@ -32,7 +40,8 @@ func processInput(input interface{}) ([]string, error) {
 			for i, num := range v {
 				switch n := num.(type) {
 				case float64:
-					numbers[i] = fmt.Sprintf("%.10g", n)
+					// float64を整数に変換
+					numbers[i] = fmt.Sprintf("%d", int(n))
 				case int:
 					numbers[i] = fmt.Sprintf("%d", n)
 				}
@@ -58,7 +67,11 @@ func processArrayInput(arr []interface{}) ([]string, error) {
 			}
 			result[i] = v
 		case float64:
-			result[i] = fmt.Sprintf("%.10g", v)
+			// float64を整数に変換
+			if v != float64(int(v)) {
+				return nil, fmt.Errorf("non-integer number at index %d: %v", i, v)
+			}
+			result[i] = fmt.Sprintf("%d", int(v))
 		case int:
 			result[i] = fmt.Sprintf("%d", v)
 		case []interface{}:
@@ -67,7 +80,11 @@ func processArrayInput(arr []interface{}) ([]string, error) {
 			for j, num := range v {
 				switch n := num.(type) {
 				case float64:
-					numbers[j] = fmt.Sprintf("%.10g", n)
+					// float64を整数に変換
+					if n != float64(int(n)) {
+						return nil, fmt.Errorf("non-integer number in array at index %d,%d: %v", i, j, n)
+					}
+					numbers[j] = fmt.Sprintf("%d", int(n))
 				case int:
 					numbers[j] = fmt.Sprintf("%d", n)
 				default:

@@ -153,12 +153,12 @@ func TestEmbeddingCacheOperations(t *testing.T) {
 		}
 
 		// データの検証
-		if len(cache.EmbeddingData) != len(embedding) {
-			t.Errorf("Expected embedding length %d, got %d", len(embedding), len(cache.EmbeddingData))
+		if len(cache) != len(embedding) {
+			t.Errorf("Expected embedding length %d, got %d", len(embedding), len(cache))
 		}
 		for i, v := range embedding {
-			if cache.EmbeddingData[i] != v {
-				t.Errorf("Embedding mismatch at index %d: expected %f, got %f", i, v, cache.EmbeddingData[i])
+			if cache[i] != v {
+				t.Errorf("Embedding mismatch at index %d: expected %f, got %f", i, v, cache[i])
 			}
 		}
 	})
@@ -683,13 +683,13 @@ func testEmbeddingOperations(t *testing.T, db *DB) {
 		}
 
 		// データの検証
-		if len(cache.EmbeddingData) != len(embedding) {
-			t.Errorf("Expected embedding length %d, got %d", len(embedding), len(cache.EmbeddingData))
+		if len(cache) != len(embedding) {
+			t.Errorf("Expected embedding length %d, got %d", len(embedding), len(cache))
 		}
 		for i := range embedding {
-			if cache.EmbeddingData[i] != embedding[i] {
+			if cache[i] != embedding[i] {
 				t.Errorf("Embedding mismatch at index %d: expected %f, got %f",
-					i, embedding[i], cache.EmbeddingData[i])
+					i, embedding[i], cache[i])
 			}
 		}
 	})

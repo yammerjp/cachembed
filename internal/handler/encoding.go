@@ -64,3 +64,24 @@ func convertToFloat32Slice(v interface{}) ([]float32, bool) {
 		return nil, false
 	}
 }
+
+func base64ToFloat32Slice(b64 string) ([]float32, error) {
+	data, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode base64: %w", err)
+	}
+
+	if len(data)%4 != 0 {
+		return nil, fmt.Errorf("invalid data length: %d", len(data))
+	}
+
+	result := make([]float32, len(data)/4)
+	for i := 0; i < len(data); i += 4 {
+		bits := uint32(data[i]) |
+			uint32(data[i+1])<<8 |
+			uint32(data[i+2])<<16 |
+			uint32(data[i+3])<<24
+		result[i/4] = math.Float32frombits(bits)
+	}
+	return result, nil
+}

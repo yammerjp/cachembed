@@ -6,10 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"log/slog"
 	"net/http"
-	"os"
 	"regexp"
 	"slices"
 	"strings"
@@ -21,28 +19,17 @@ import (
 
 type Handler struct {
 	allowedModels []string
-	apiKeyPattern string
 	apiKeyRegexp  *regexp.Regexp
-	upstream      *upstream.Client
-	db            *storage.DB
+	upstream      upstream.EmbeddingClient
+	db            storage.Database
 	debugBody     bool
 }
 
-func NewHandler(allowedModels []string, apiKeyPattern string, upstreamURL string, db *storage.DB, debugBody bool) http.Handler {
-	var re *regexp.Regexp
-	if apiKeyPattern != "" {
-		var err error
-		re, err = regexp.Compile(apiKeyPattern)
-		if err != nil {
-			log.Fatalf("Invalid API key pattern: %v", err)
-			os.Exit(1)
-		}
-	}
+func NewHandler(allowedModels []string, apiKeyRegexp *regexp.Regexp, db storage.Database, upstream upstream.EmbeddingClient, debugBody bool) *Handler {
 	return &Handler{
 		allowedModels: allowedModels,
-		apiKeyPattern: apiKeyPattern,
-		apiKeyRegexp:  re,
-		upstream:      upstream.NewClient(upstreamURL),
+		apiKeyRegexp:  apiKeyRegexp,
+		upstream:      upstream,
 		db:            db,
 		debugBody:     debugBody,
 	}
@@ -135,9 +122,9 @@ func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request) error {
 		)
 	}
 
-	// 入力値を適切な型に変換
-	var input interface{}
-	if err := json.Unmarshal(rawReq.Input, &input); err != nil {
+	// 入力値をパースして適切な型に変換
+	input, err := ParseEmbeddingInput(rawReq.Input)
+	if err != nil {
 		return NewHandlerError(
 			http.StatusBadRequest,
 			"Invalid input format: "+err.Error(),
@@ -146,141 +133,18 @@ func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request) error {
 		)
 	}
 
-	// 入力値の型を検証し、適切な形式に変換する
-	switch v := input.(type) {
-	case string:
-		// 文字列の場合はそのまま
-		if v == "" {
-			return NewHandlerError(
-				http.StatusBadRequest,
-				"Input string must not be empty",
-				"invalid_request_error",
-				fmt.Errorf("empty string input"),
-			)
-		}
-		input = v
-
-	case []interface{}:
-		// 配列の場合、要素の型を確認
-		if len(v) == 0 {
-			return NewHandlerError(
-				http.StatusBadRequest,
-				"Input array must not be empty",
-				"invalid_request_error",
-				fmt.Errorf("empty array input"),
-			)
-		}
-
-		// 最初の要素の型で配列の種類を判断
-		switch v[0].(type) {
-		case float64, int: // 数値配列の場合
-			// 全要素が数値であることを確認
-			numbers := make([]float64, len(v))
-			for i, item := range v {
-				switch num := item.(type) {
-				case float64:
-					numbers[i] = num
-				case int:
-					numbers[i] = float64(num)
-				default:
-					return NewHandlerError(
-						http.StatusBadRequest,
-						"All elements in number array must be numbers",
-						"invalid_request_error",
-						fmt.Errorf("invalid element type in number array at index %d: got %T", i, item),
-					)
-				}
-			}
-			input = numbers
-
-		case string: // 文字列配列の場合
-			// 全要素が文字列であることを確認
-			strings := make([]string, len(v))
-			for i, item := range v {
-				str, ok := item.(string)
-				if !ok {
-					return NewHandlerError(
-						http.StatusBadRequest,
-						"All elements in string array must be strings",
-						"invalid_request_error",
-						fmt.Errorf("invalid element type in string array at index %d: got %T", i, item),
-					)
-				}
-				if str == "" {
-					return NewHandlerError(
-						http.StatusBadRequest,
-						"String elements must not be empty",
-						"invalid_request_error",
-						fmt.Errorf("empty string at index %d", i),
-					)
-				}
-				strings[i] = str
-			}
-			input = strings
-
-		case []interface{}: // 2次元数値配列の場合
-			// 全要素が数値配列であることを確認
-			arrays := make([][]float64, len(v))
-			for i, arr := range v {
-				subArr, ok := arr.([]interface{})
-				if !ok {
-					return NewHandlerError(
-						http.StatusBadRequest,
-						"All elements must be number arrays",
-						"invalid_request_error",
-						fmt.Errorf("invalid element type at index %d: got %T", i, arr),
-					)
-				}
-				numbers := make([]float64, len(subArr))
-				for j, item := range subArr {
-					switch num := item.(type) {
-					case float64:
-						numbers[j] = num
-					case int:
-						numbers[j] = float64(num)
-					default:
-						return NewHandlerError(
-							http.StatusBadRequest,
-							"All elements in nested arrays must be numbers",
-							"invalid_request_error",
-							fmt.Errorf("invalid element type at index [%d][%d]: got %T", i, j, item),
-						)
-					}
-				}
-				arrays[i] = numbers
-			}
-			input = arrays
-
-		default:
-			return NewHandlerError(
-				http.StatusBadRequest,
-				"Input array elements must be either all numbers, all strings, or all number arrays",
-				"invalid_request_error",
-				fmt.Errorf("invalid array element type: got %T", v[0]),
-			)
-		}
-
-	default:
-		return NewHandlerError(
-			http.StatusBadRequest,
-			"Input must be a string, an array of numbers, an array of strings, or an array of number arrays",
-			"invalid_request_error",
-			fmt.Errorf("invalid input type: got %T", input),
-		)
-	}
-
 	// リクエストオブジェクトを構築
 	req := upstream.EmbeddingRequest{
-		Input:          input,
+		Input:          input.ToAPIInput(),
 		Model:          rawReq.Model,
-		EncodingFormat: rawReq.EncodingFormat,
+		EncodingFormat: "base64",
 	}
 
 	if err := h.validateEmbeddingRequest(&req); err != nil {
 		return err
 	}
 
-	hashes, err := req.InputHashes()
+	hashes, err := input.InputHashes()
 	if err != nil {
 		return NewHandlerError(
 			http.StatusBadRequest,
@@ -304,9 +168,15 @@ func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request) error {
 			)
 		}
 		if cache != nil {
+			var responseEmbedding interface{}
+			if rawReq.EncodingFormat == "base64" {
+				responseEmbedding = float32ToBase64(cache)
+			} else {
+				responseEmbedding = cache
+			}
 			responseEmbeddingDatas[i] = upstream.EmbeddingData{
 				Object:    "embedding",
-				Embedding: cache.EmbeddingData,
+				Embedding: responseEmbedding,
 				Index:     i,
 			}
 		} else {
@@ -316,7 +186,7 @@ func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request) error {
 
 	// キャッシュミスがある場合、APIリクエストを実行
 	if len(missedIndexes) > 0 {
-		input, err := req.PickInputs(missedIndexes)
+		pickedInput, err := input.PickInputs(missedIndexes)
 		if err != nil {
 			return NewHandlerError(
 				http.StatusInternalServerError,
@@ -326,9 +196,9 @@ func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request) error {
 			)
 		}
 		missedReq := upstream.EmbeddingRequest{
-			Input:          input,
+			Input:          pickedInput.ToAPIInput(),
 			Model:          req.Model,
-			EncodingFormat: req.EncodingFormat,
+			EncodingFormat: "base64",
 		}
 		missedResp, err := h.upstream.CreateEmbedding(&missedReq, r.Header.Get("Authorization"))
 		if err != nil {
@@ -352,16 +222,47 @@ func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request) error {
 
 		// APIレスポンスをキャッシュに保存し、レスポンスに組み込む
 		for i, data := range missedResp.Data {
-			embedding, ok := convertToFloat32Slice(data.Embedding)
-			if !ok {
+			// base64からfloat32に変換
+			var embedding []float32
+			switch v := data.Embedding.(type) {
+			case string:
+				// base64エンコードされた文字列の場合
+				var err error
+				embedding, err = base64ToFloat32Slice(v)
+				if err != nil {
+					return NewHandlerError(
+						http.StatusInternalServerError,
+						"Failed to decode base64 embedding from upstream",
+						"internal_error",
+						err,
+					)
+				}
+			case []interface{}:
+				// float64の配列の場合
+				embedding = make([]float32, len(v))
+				for j, val := range v {
+					switch num := val.(type) {
+					case float64:
+						embedding[j] = float32(num)
+					default:
+						return NewHandlerError(
+							http.StatusInternalServerError,
+							"Invalid embedding type from upstream",
+							"internal_error",
+							fmt.Errorf("unexpected type in embedding array: %T", val),
+						)
+					}
+				}
+			default:
 				return NewHandlerError(
 					http.StatusInternalServerError,
-					"Unexpected embedding type from upstream",
+					"Invalid embedding type from upstream",
 					"internal_error",
-					fmt.Errorf("unexpected embedding type from upstream at index %d", i),
+					fmt.Errorf("unexpected embedding type: %T", data.Embedding),
 				)
 			}
 
+			// キャッシュに保存
 			if err := h.db.StoreEmbedding(hashes[missedIndexes[i]], req.Model, embedding); err != nil {
 				slog.Error("failed to store cache",
 					"error", err,
@@ -371,22 +272,24 @@ func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request) error {
 				)
 			}
 
+			// クライアントのリクエストに応じたフォーマットでレスポンスを設定
+			var responseEmbedding interface{}
+			if rawReq.EncodingFormat == "base64" {
+				responseEmbedding = data.Embedding
+			} else {
+				responseEmbedding = embedding
+			}
+
 			// レスポンスに組み込む
-			responseEmbeddingDatas[missedIndexes[i]] = data
+			responseEmbeddingDatas[missedIndexes[i]] = upstream.EmbeddingData{
+				Object:    "embedding",
+				Embedding: responseEmbedding,
+				Index:     missedIndexes[i],
+			}
 		}
 
 		// 使用量を記録
 		usage = missedResp.Usage
-	}
-
-	// base64エンコーディングが要求された場合の処理
-	if req.EncodingFormat == "base64" {
-		for i, data := range responseEmbeddingDatas {
-			embedding, ok := convertToFloat32Slice(data)
-			if ok {
-				responseEmbeddingDatas[i].Embedding = float32ToBase64(embedding)
-			}
-		}
 	}
 
 	var response upstream.EmbeddingResponse
