@@ -425,6 +425,58 @@ func TestHandleRequest(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "cache miss with different model",
+			initialData: []InitialData{
+				{
+					inputHash: "e02aa1b106d5c7c6a98def2b13005d5b84fd8dc8", // "Hello, world"のハッシュ
+					model:     "text-embedding-3-small",
+					embedding: []float32{0.1, 0.2, 0.3},
+				},
+			},
+			request: Request{
+				Input: "Hello, world",
+				Model: "text-embedding-ada-002",
+			},
+			mockUpstream: mockUpstream{
+				expectedInput:  "Hello, world",
+				expectedFormat: "base64",
+				mockResponse: &upstream.EmbeddingResponse{
+					Object: "list",
+					Data: []upstream.EmbeddingData{
+						{
+							Object:    "embedding",
+							Embedding: base64Dummy1,
+							Index:     0,
+						},
+					},
+					Model: "text-embedding-ada-002",
+					Usage: upstream.Usage{
+						PromptTokens: 8,
+						TotalTokens:  8,
+					},
+				},
+				callCount: new(int),
+			},
+			expectedResponse: expectedResponse{
+				status: http.StatusOK,
+				body: &upstream.EmbeddingResponse{
+					Object: "list",
+					Data: []upstream.EmbeddingData{
+						{
+							Object:    "embedding",
+							Embedding: vecDummy1,
+							Index:     0,
+						},
+					},
+					Model: "text-embedding-ada-002",
+					Usage: upstream.Usage{
+						PromptTokens: 8,
+						TotalTokens:  8,
+					},
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {
