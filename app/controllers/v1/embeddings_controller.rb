@@ -21,29 +21,7 @@ class V1::EmbeddingsController < ApplicationController
   end
 
   def input_param
-    input = params.require(:embedding)[:input]
-
-    if input.is_a?(String)
-      # "hello"
-      return input
-    end
-
-    if input.is_a?(Array) && input.all? { |i| i.is_a?(Integer) }
-      # [1, 2, 3]
-      return input
-    end
-
-    if input.is_a?(Array) && input.all? { |i| i.is_a?(String) }
-      # ["hello", "world"]
-      return input
-    end
-
-    if input.is_a?(Array) && input.all? { |i| i.is_a?(Array) && i.all? { |j| j.is_a?(Integer) } }
-      # [[1, 2, 3], [4, 5, 6]]
-      return input
-    end
-
-    raise InvalidInputError
+    params.require(:embedding)[:input]
   end
 
   def require_api_key
