@@ -3,9 +3,9 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"github.com/yammerjp/cachembed/internal/storage"
@@ -13,72 +13,177 @@ import (
 )
 
 func TestHandleRequest(t *testing.T) {
-	// モックレスポンスを生成する関数
-	createMockHandler := func() http.HandlerFunc {
-		requestCount := 0 // クロージャで状態を保持
-		return func(w http.ResponseWriter, r *http.Request) {
-			requestCount++
-			// 2回目以降のリクエストはキャッシュから取得されるはずなので、
-			// このハンドラーは1回目のリクエストでのみ呼ばれるはず
-			if requestCount > 1 {
-				t.Error("Unexpected request to upstream server")
-				return
-			}
+	type InitialData struct {
+		inputHash string
+		model     string
+		embedding []float32
+	}
 
-			// リクエストの検証
-			if r.Header.Get("Authorization") != "Bearer test-key" {
-				t.Error("Authorization header mismatch")
-			}
-			if r.Header.Get("Content-Type") != "application/json" {
-				t.Error("Content-Type header mismatch")
-			}
+	type Request struct {
+		Input          interface{} `json:"input"`
+		Model          string      `json:"model"`
+		EncodingFormat string      `json:"encoding_format,omitempty"`
+	}
 
-			// リクエストボディの検証
-			body, _ := io.ReadAll(r.Body)
-			var req map[string]interface{}
-			if err := json.Unmarshal(body, &req); err != nil {
-				t.Errorf("Failed to parse request body: %v", err)
-			}
-			if req["input"] != "Hello, world" {
-				t.Errorf("Input mismatch: got %v", req["input"])
-			}
+	type mockUpstream struct {
+		expectedInput  interface{}
+		expectedFormat string
+		mockResponse   *upstream.EmbeddingResponse
+		callCount      *int
+	}
 
-			// APIレスポンスを作成
-			resp := upstream.EmbeddingResponse{
-				Object: "list",
-				Data: []upstream.EmbeddingData{
-					{
-						Object:    "embedding",
-						Embedding: []float32{0.1, 0.2, 0.3},
-						Index:     0,
-					},
-				},
-				Model: "text-embedding-ada-002",
-				Usage: upstream.Usage{
-					PromptTokens: 8,
-					TotalTokens:  8,
-				},
-			}
-
-			// レスポンスを返す
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(resp)
-		}
+	type expectedResponse struct {
+		status         int
+		body           *upstream.EmbeddingResponse
+		errorType      string
+		errorMsg       string
+		encodingFormat string
 	}
 
 	tests := []struct {
-		name    string
-		request map[string]interface{}
-		setup   func(t *testing.T, server *httptest.Server, db storage.Database)
+		name             string
+		initialData      []InitialData
+		request          Request
+		mockUpstream     mockUpstream
+		expectedResponse expectedResponse
 	}{
 		{
 			name: "successful single string input",
-			request: map[string]interface{}{
-				"input": "Hello, world",
-				"model": "text-embedding-ada-002",
+			request: Request{
+				Input: "Hello, world",
+				Model: "text-embedding-ada-002",
 			},
-			setup: func(t *testing.T, server *httptest.Server, db storage.Database) {
-				server.Config.Handler = createMockHandler()
+			mockUpstream: mockUpstream{
+				expectedInput:  "Hello, world",
+				expectedFormat: "base64",
+				mockResponse: &upstream.EmbeddingResponse{
+					Object: "list",
+					Data: []upstream.EmbeddingData{
+						{
+							Object:    "embedding",
+							Embedding: dummyVecBase64Str,
+							Index:     0,
+						},
+					},
+					Model: "text-embedding-ada-002",
+					Usage: upstream.Usage{
+						PromptTokens: 8,
+						TotalTokens:  8,
+					},
+				},
+			},
+			expectedResponse: expectedResponse{
+				status:         http.StatusOK,
+				encodingFormat: "",
+				body: &upstream.EmbeddingResponse{
+					Object: "list",
+					Data: []upstream.EmbeddingData{
+						{
+							Object:    "embedding",
+							Embedding: dummyVec,
+							Index:     0,
+						},
+					},
+					Model: "text-embedding-ada-002",
+					Usage: upstream.Usage{
+						PromptTokens: 8,
+						TotalTokens:  8,
+					},
+				},
+			},
+		},
+		{
+			name: "invalid model error",
+			request: Request{
+				Input: "Hello, world",
+				Model: "invalid-model",
+			},
+			mockUpstream: mockUpstream{},
+			expectedResponse: expectedResponse{
+				status:    http.StatusBadRequest,
+				errorType: "invalid_request_error",
+				errorMsg:  "Unsupported model: invalid-model",
+			},
+		},
+		{
+			name: "base64 encoding format",
+			request: Request{
+				Input:          "Hello, world",
+				Model:          "text-embedding-ada-002",
+				EncodingFormat: "base64",
+			},
+			mockUpstream: mockUpstream{
+				expectedInput:  "Hello, world",
+				expectedFormat: "base64",
+				mockResponse: &upstream.EmbeddingResponse{
+					Object: "list",
+					Data: []upstream.EmbeddingData{
+						{
+							Object:    "embedding",
+							Embedding: dummyVecBase64Str,
+							Index:     0,
+						},
+					},
+					Model: "text-embedding-ada-002",
+					Usage: upstream.Usage{
+						PromptTokens: 8,
+						TotalTokens:  8,
+					},
+				},
+			},
+			expectedResponse: expectedResponse{
+				status:         http.StatusOK,
+				encodingFormat: "base64",
+				body: &upstream.EmbeddingResponse{
+					Object: "list",
+					Data: []upstream.EmbeddingData{
+						{
+							Object:    "embedding",
+							Embedding: dummyVecBase64Str,
+							Index:     0,
+						},
+					},
+					Model: "text-embedding-ada-002",
+					Usage: upstream.Usage{
+						PromptTokens: 8,
+						TotalTokens:  8,
+					},
+				},
+			},
+		},
+		{
+			name: "cache hit",
+			initialData: []InitialData{
+				{
+					inputHash: "e02aa1b106d5c7c6a98def2b13005d5b84fd8dc8",
+					model:     "text-embedding-ada-002",
+					embedding: []float32{0.1, 0.2, 0.3},
+				},
+			},
+			request: Request{
+				Input: "Hello, world",
+				Model: "text-embedding-ada-002",
+			},
+			mockUpstream: mockUpstream{
+				callCount: new(int),
+			},
+			expectedResponse: expectedResponse{
+				status: http.StatusOK,
+				body: &upstream.EmbeddingResponse{
+					Object: "list",
+					Data: []upstream.EmbeddingData{
+						{
+							Object:    "embedding",
+							Embedding: []float32{0.1, 0.2, 0.3},
+							Index:     0,
+						},
+					},
+					Model: "text-embedding-ada-002",
+					Usage: upstream.Usage{
+						PromptTokens: 0,
+						TotalTokens:  0,
+					},
+				},
 			},
 		},
 	}
@@ -92,81 +197,141 @@ func TestHandleRequest(t *testing.T) {
 			}
 			defer db.Close()
 
-			// モックサーバーの設定
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
-			defer server.Close()
+			// マイグレーションを実行
+			if err := db.RunMigrations(); err != nil {
+				t.Fatalf("Failed to run migrations: %v", err)
+			}
 
-			// テストケース固有のセットアップを実行
-			tt.setup(t, server, db)
+			// 初期データをロード
+			for _, data := range tt.initialData {
+				if err := db.StoreEmbedding(data.inputHash, data.model, data.embedding); err != nil {
+					t.Fatalf("Failed to store initial data: %v", err)
+				}
+			}
+
+			// モックサーバーの設定
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// upstreamの呼び出し回数をインクリメント
+				if tt.mockUpstream.callCount != nil {
+					*tt.mockUpstream.callCount++
+				}
+
+				// invalid modelの場合は早期リターン
+				if tt.expectedResponse.status == http.StatusBadRequest {
+					w.WriteHeader(http.StatusBadRequest)
+					json.NewEncoder(w).Encode(map[string]interface{}{
+						"error": map[string]interface{}{
+							"message": tt.expectedResponse.errorMsg,
+							"type":    tt.expectedResponse.errorType,
+						},
+					})
+					return
+				}
+
+				var req map[string]interface{}
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					t.Errorf("Failed to parse request body: %v", err)
+					return
+				}
+
+				// input値の検証
+				if !reflect.DeepEqual(req["input"], tt.mockUpstream.expectedInput) {
+					t.Errorf("Input mismatch: got %v, want %v", req["input"], tt.mockUpstream.expectedInput)
+				}
+
+				// encoding_formatの検証
+				format, ok := req["encoding_format"].(string)
+				if tt.mockUpstream.expectedFormat != "" {
+					if !ok || format != tt.mockUpstream.expectedFormat {
+						t.Errorf("Encoding format mismatch: got %v, want %v", format, tt.mockUpstream.expectedFormat)
+					}
+				}
+
+				// モックレスポンスを返す
+				w.Header().Set("Content-Type", "application/json")
+				if err := json.NewEncoder(w).Encode(tt.mockUpstream.mockResponse); err != nil {
+					t.Errorf("Failed to encode mock response: %v", err)
+				}
+			}))
+			defer server.Close()
 
 			// テスト用のハンドラを作成
 			h := NewHandler(
 				[]string{"text-embedding-ada-002"},
-				nil, // API keyの正規表現チェックは無効
+				nil,
 				db,
 				upstream.NewClient(server.Client(), server.URL),
 				false,
 			)
 
-			// リクエストJSONの作成
+			// リクエストの実行
 			reqJSON, err := json.Marshal(tt.request)
 			if err != nil {
 				t.Fatalf("Failed to marshal request: %v", err)
 			}
 
-			// 1回目のリクエスト
 			req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", bytes.NewReader(reqJSON))
 			req.Header.Set("Authorization", "Bearer test-key")
 			req.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
 
 			err = h.handleRequest(w, req)
-			if err != nil {
-				t.Fatalf("First request failed: %v", err)
+
+			// ステータスコードの検証
+			if w.Code != tt.expectedResponse.status {
+				t.Errorf("Expected status code %d, got %d", tt.expectedResponse.status, w.Code)
 			}
 
-			if w.Code != http.StatusOK {
-				t.Errorf("Expected status code %d, got %d", http.StatusOK, w.Code)
+			// キャッシュヒットの場合、upstreamが呼ばれていないことを確認
+			if tt.name == "cache hit" && *tt.mockUpstream.callCount > 0 {
+				t.Errorf("Expected no upstream calls for cache hit, got %d calls", *tt.mockUpstream.callCount)
 			}
 
-			var resp upstream.EmbeddingResponse
-			if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-				t.Fatalf("Failed to decode response: %v", err)
-			}
+			// レスポンスボディの検証
+			if tt.expectedResponse.body != nil {
+				var resp upstream.EmbeddingResponse
+				if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+					t.Fatalf("Failed to decode response: %v", err)
+				}
 
-			// レスポンスの検証
-			if len(resp.Data) != 1 {
-				t.Errorf("Expected 1 embedding, got %d", len(resp.Data))
-			}
-			if resp.Usage.PromptTokens != 8 {
-				t.Errorf("Expected 8 prompt tokens, got %d", resp.Usage.PromptTokens)
-			}
-			if resp.Usage.TotalTokens != 8 {
-				t.Errorf("Expected 8 total tokens, got %d", resp.Usage.TotalTokens)
-			}
+				// JSONに変換して比較
+				gotJSON, err := json.Marshal(resp)
+				if err != nil {
+					t.Fatalf("Failed to marshal response: %v", err)
+				}
+				wantJSON, err := json.Marshal(tt.expectedResponse.body)
+				if err != nil {
+					t.Fatalf("Failed to marshal expected response: %v", err)
+				}
 
-			// 2回目のリクエスト（キャッシュから取得されるはず）
-			req = httptest.NewRequest(http.MethodPost, "/v1/embeddings", bytes.NewReader(reqJSON))
-			req.Header.Set("Authorization", "Bearer test-key")
-			req.Header.Set("Content-Type", "application/json")
-			w2 := httptest.NewRecorder()
+				// 比較のために一度JSONをマップに変換
+				var got, want map[string]interface{}
+				if err := json.Unmarshal(gotJSON, &got); err != nil {
+					t.Fatalf("Failed to unmarshal response JSON: %v", err)
+				}
+				if err := json.Unmarshal(wantJSON, &want); err != nil {
+					t.Fatalf("Failed to unmarshal expected JSON: %v", err)
+				}
 
-			err = h.handleRequest(w2, req)
-			if err != nil {
-				t.Fatalf("Second request failed: %v", err)
-			}
-
-			var resp2 upstream.EmbeddingResponse
-			if err := json.NewDecoder(w2.Body).Decode(&resp2); err != nil {
-				t.Fatalf("Failed to decode second response: %v", err)
-			}
-
-			// キャッシュされたレスポンスの検証
-			if resp2.Usage.PromptTokens != 0 {
-				t.Errorf("Expected 0 prompt tokens for cached response, got %d", resp2.Usage.PromptTokens)
-			}
-			if resp2.Usage.TotalTokens != 0 {
-				t.Errorf("Expected 0 total tokens for cached response, got %d", resp2.Usage.TotalTokens)
+				if !reflect.DeepEqual(got, want) {
+					t.Errorf("Response mismatch:\ngot: %s\nwant: %s", gotJSON, wantJSON)
+				}
+			} else {
+				var errorResp struct {
+					Error struct {
+						Message string `json:"message"`
+						Type    string `json:"type"`
+					} `json:"error"`
+				}
+				if err := json.NewDecoder(w.Body).Decode(&errorResp); err != nil {
+					t.Fatalf("Failed to decode error response: %v", err)
+				}
+				if errorResp.Error.Type != tt.expectedResponse.errorType {
+					t.Errorf("Error type mismatch: got %v, want %v", errorResp.Error.Type, tt.expectedResponse.errorType)
+				}
+				if errorResp.Error.Message != tt.expectedResponse.errorMsg {
+					t.Errorf("Error message mismatch: got %v, want %v", errorResp.Error.Message, tt.expectedResponse.errorMsg)
+				}
 			}
 		})
 	}

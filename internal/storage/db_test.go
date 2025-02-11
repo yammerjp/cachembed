@@ -132,7 +132,11 @@ func TestEmbeddingCacheOperations(t *testing.T) {
 	// テストデータ
 	inputHash := "testhash123"
 	model := "test-model"
-	embedding := []float32{0.1, 0.2, 0.3, 0.4, 0.5}
+	embedding := []float32{0.1,
+		0.2,
+		0.3,
+		0.4,
+		0.5}
 
 	// Store操作のテスト
 	t.Run("store embedding", func(t *testing.T) {
@@ -189,7 +193,9 @@ func TestEmbeddingCacheOperations(t *testing.T) {
 		// 古いエントリを作成
 		for i := 0; i < 5; i++ {
 			hash := fmt.Sprintf("old_hash%d", i)
-			embeddingData := encodeEmbedding([]float32{0.1, 0.2, 0.3})
+			embeddingData := encodeEmbedding([]float32{0.1,
+				0.2,
+				0.3})
 			_, err := db.Exec(db.dialect.ConvertPlaceholders(`
 				INSERT INTO embeddings (input_hash, model, embedding_data, created_at, last_accessed_at)
 				VALUES ($1, $2, $3, $4, $5)
@@ -202,7 +208,9 @@ func TestEmbeddingCacheOperations(t *testing.T) {
 		// 新しいエントリを作成
 		for i := 0; i < 5; i++ {
 			hash := fmt.Sprintf("new_hash%d", i)
-			if err := db.StoreEmbedding(hash, model, []float32{0.1, 0.2, 0.3}); err != nil {
+			if err := db.StoreEmbedding(hash, model, []float32{0.1,
+				0.2,
+				0.3}); err != nil {
 				t.Fatalf("Failed to store embedding: %v", err)
 			}
 		}
@@ -263,7 +271,9 @@ func TestDeleteOldEntries(t *testing.T) {
 
 	// テストデータ
 	model := "test-model"
-	embedding := []float32{0.1, 0.2, 0.3}
+	embedding := []float32{0.1,
+		0.2,
+		0.3}
 
 	// 現在時刻を基準として保存
 	baseTime := time.Now().UTC()
@@ -386,7 +396,9 @@ func TestDeleteEntriesBeforeWithIDRange(t *testing.T) {
 
 	// テストデータ
 	model := "test-model"
-	embedding := []float32{0.1, 0.2, 0.3}
+	embedding := []float32{0.1,
+		0.2,
+		0.3}
 
 	// 現在時刻を基準として保存
 	baseTime := time.Now().UTC()
@@ -500,7 +512,9 @@ func TestDeleteEntriesBeforeWithSleep(t *testing.T) {
 	defer db.Close()
 
 	// テストデータの作成（10エントリ）
-	embedding := []float32{0.1, 0.2, 0.3}
+	embedding := []float32{0.1,
+		0.2,
+		0.3}
 	for i := 0; i < 10; i++ {
 		hash := fmt.Sprintf("hash%d", i)
 		if err := db.StoreEmbedding(hash, "test-model", embedding); err != nil {
@@ -663,7 +677,11 @@ func testEmbeddingOperations(t *testing.T, db *DB) {
 
 	inputHash := "testhash123"
 	model := "test-model"
-	embedding := []float32{0.1, 0.2, 0.3, 0.4, 0.5}
+	embedding := []float32{0.1,
+		0.2,
+		0.3,
+		0.4,
+		0.5}
 
 	// Store操作のテスト
 	t.Run("store embedding", func(t *testing.T) {
@@ -704,14 +722,18 @@ func testGarbageCollection(t *testing.T, db *DB) {
 	}
 
 	model := "test-model"
-	embedding := []float32{0.1, 0.2, 0.3}
+	embedding := []float32{0.1,
+		0.2,
+		0.3}
 	baseTime := time.Now().UTC()
 	oldTime := baseTime.Add(-1 * time.Hour)
 
 	// 古いエントリを作成
 	for i := 0; i < 5; i++ {
 		hash := fmt.Sprintf("old_hash%d", i)
-		embeddingData := encodeEmbedding([]float32{0.1, 0.2, 0.3})
+		embeddingData := encodeEmbedding([]float32{0.1,
+			0.2,
+			0.3})
 		_, err := db.Exec(db.dialect.ConvertPlaceholders(`
 			INSERT INTO embeddings (input_hash, model, embedding_data, created_at, last_accessed_at)
 			VALUES ($1, $2, $3, $4, $5)
@@ -819,7 +841,9 @@ func testIDRangeDeletion(t *testing.T, db *DB) {
 	}
 
 	model := "test-model"
-	embedding := []float32{0.1, 0.2, 0.3}
+	embedding := []float32{0.1,
+		0.2,
+		0.3}
 	baseTime := time.Now().UTC()
 	oldTime := baseTime.Add(-1 * time.Hour)
 
@@ -955,7 +979,9 @@ func TestGetMaxID(t *testing.T) {
 			})
 
 			// テストデータを挿入
-			embedding := []float32{0.1, 0.2, 0.3}
+			embedding := []float32{0.1,
+				0.2,
+				0.3}
 			for i := 0; i < 5; i++ {
 				hash := fmt.Sprintf("hash%d", i)
 				if err := db.StoreEmbedding(hash, "test-model", embedding); err != nil {

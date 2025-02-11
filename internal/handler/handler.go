@@ -36,12 +36,16 @@ func NewHandler(allowedModels []string, apiKeyRegexp *regexp.Regexp, db storage.
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h.handleRequest(w, r)
+}
+
+func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request) error {
 	requestID := uuid.New().String()
 	ctx := r.Context()
 	ctx = context.WithValue(ctx, "request_id", requestID)
 	r = r.WithContext(ctx)
 
-	err := h.handleRequest(w, r)
+	err := h.inHandleRequest(w, r)
 
 	// ログ出力用の属性を準備
 	attrs := []any{
@@ -54,7 +58,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// 成功時
 		attrs = append(attrs, "status", http.StatusOK)
 		slog.Info("request completed", attrs...)
-		return
+		return nil
 	}
 
 	// エラー時
@@ -87,9 +91,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		slog.Error("unexpected error", attrs...)
 		writeError(w, http.StatusInternalServerError, "Internal server error", "internal_error")
 	}
+	return nil
 }
 
-func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request) error {
+func (h *Handler) inHandleRequest(w http.ResponseWriter, r *http.Request) error {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		return NewHandlerError(
@@ -158,6 +163,7 @@ func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request) error {
 	missedIndexes := make([]int, 0)
 	usage := upstream.Usage{}
 	for i, hash := range hashes {
+		slog.Info("check cache", "hash", hash, "model", req.Model)
 		cache, err := h.db.GetEmbedding(hash, req.Model)
 		if err != nil {
 			return NewHandlerError(
@@ -292,23 +298,15 @@ func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request) error {
 		usage = missedResp.Usage
 	}
 
-	var response upstream.EmbeddingResponse
-	if len(hashes) == 1 {
-		response.Data = []upstream.EmbeddingData{
-			{
-				Object:    "embedding",
-				Embedding: responseEmbeddingDatas[0].Embedding,
-			},
-		}
-	} else {
-		response.Data = responseEmbeddingDatas
-	}
-	response.Usage = usage
-
 	// レスポンスを返す
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	return json.NewEncoder(w).Encode(response)
+	return json.NewEncoder(w).Encode(upstream.EmbeddingResponse{
+		Object: "list",
+		Data:   responseEmbeddingDatas,
+		Model:  req.Model,
+		Usage:  usage,
+	})
 }
 
 func (h *Handler) validateRequest(r *http.Request) error {
