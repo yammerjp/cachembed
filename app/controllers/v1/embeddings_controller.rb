@@ -1,10 +1,8 @@
 class V1::EmbeddingsController < ApplicationController
-  class InvalidInputError < StandardError; end
-
   skip_before_action :verify_authenticity_token
   before_action :require_api_key
 
-  rescue_from InvalidInputError do |e|
+  rescue_from EmbeddingTarget::InvalidInputError do |e|
     render json: { error: "Invalid input" }, status: :bad_request
   end
 
