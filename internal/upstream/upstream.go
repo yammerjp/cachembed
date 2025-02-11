@@ -3,105 +3,82 @@ package upstream
 import (
 	"bytes"
 	"encoding/json"
-	"io"
+	"fmt"
 	"net/http"
-	"time"
 )
 
-type EmbeddingRequest struct {
-	Input          interface{} `json:"input"`
-	Model          string      `json:"model"`
-	EncodingFormat string      `json:"encoding_format,omitempty"`
-	Dimensions     *int        `json:"dimensions,omitempty"`
-	User           string      `json:"user,omitempty"`
-}
-
+// ErrorResponse はOpenAI APIからのエラーレスポンスの構造体
 type ErrorResponse struct {
 	Error struct {
 		Message string `json:"message"`
 		Type    string `json:"type"`
-		Code    string `json:"code"`
+		Code    string `json:"code,omitempty"`
 	} `json:"error"`
 }
 
-type EmbeddingResponse struct {
-	Object string `json:"object"`
-	Data   []struct {
-		Object    string      `json:"object"`
-		Embedding interface{} `json:"embedding"`
-		Index     int         `json:"index"`
-	} `json:"data"`
-	Model string `json:"model"`
-	Usage struct {
-		PromptTokens int `json:"prompt_tokens"`
-		TotalTokens  int `json:"total_tokens"`
-	} `json:"usage"`
-}
-
+// Client はOpenAI APIクライアントの構造体
 type Client struct {
-	url        string
-	httpClient *http.Client
+	baseURL string
 }
 
-func NewClient(url string) *Client {
+// NewClient は新しいClientを作成します
+func NewClient(baseURL string) *Client {
 	return &Client{
-		url: url,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		baseURL: baseURL,
 	}
 }
 
+// CreateEmbedding は埋め込みを作成します
 func (c *Client) CreateEmbedding(req *EmbeddingRequest, authHeader string) (*EmbeddingResponse, error) {
-	requestBody, err := json.Marshal(req)
+	jsonData, err := json.Marshal(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	upstreamReq, err := http.NewRequest(http.MethodPost, c.url, bytes.NewBuffer(requestBody))
+	httpReq, err := http.NewRequest("POST", c.baseURL+"/v1/embeddings", bytes.NewBuffer(jsonData))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	upstreamReq.Header.Set("Content-Type", "application/json")
-	upstreamReq.Header.Set("Authorization", authHeader)
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", authHeader)
 
-	resp, err := c.httpClient.Do(upstreamReq)
+	client := &http.Client{}
+	resp, err := client.Do(httpReq)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
 	if resp.StatusCode != http.StatusOK {
-		// エラーレスポンスをそのまま返す
 		var errResp ErrorResponse
-		if err := json.Unmarshal(respBody, &errResp); err != nil {
-			return nil, err
+		if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+			return nil, &UpstreamError{
+				StatusCode: resp.StatusCode,
+				Response: map[string]interface{}{
+					"error": map[string]interface{}{
+						"message": "Failed to decode error response",
+						"type":    "internal_error",
+					},
+				},
+			}
 		}
 		return nil, &UpstreamError{
 			StatusCode: resp.StatusCode,
-			Response:   &errResp,
+			Response: map[string]interface{}{
+				"error": map[string]interface{}{
+					"message": errResp.Error.Message,
+					"type":    errResp.Error.Type,
+					"code":    errResp.Error.Code,
+				},
+			},
 		}
 	}
 
-	var embeddingResp EmbeddingResponse
-	if err := json.Unmarshal(respBody, &embeddingResp); err != nil {
-		return nil, err
+	var embedResp EmbeddingResponse
+	if err := json.NewDecoder(resp.Body).Decode(&embedResp); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	return &embeddingResp, nil
-}
-
-type UpstreamError struct {
-	StatusCode int
-	Response   *ErrorResponse
-}
-
-func (e *UpstreamError) Error() string {
-	return e.Response.Error.Message
+	return &embedResp, nil
 }

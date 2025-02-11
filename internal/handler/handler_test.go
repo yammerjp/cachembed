@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/yammerjp/cachembed/internal/storage"
 	"github.com/yammerjp/cachembed/internal/upstream"
@@ -76,6 +77,9 @@ func TestHandleEmbeddings(t *testing.T) {
 		wantCacheHit  bool
 		wantTokens    int
 		wantErrorType string
+		setupCache    bool
+		method        string
+		path          string
 	}{
 		{
 			name: "valid string input",
@@ -102,7 +106,7 @@ func TestHandleEmbeddings(t *testing.T) {
 		{
 			name: "valid integer array input",
 			request: map[string]interface{}{
-				"input": []int{1, 2, 3, 4},
+				"input": []interface{}{1, 2, 3},
 				"model": "text-embedding-ada-002",
 			},
 			authHeader:   "Bearer " + validAPIKey,
@@ -113,18 +117,19 @@ func TestHandleEmbeddings(t *testing.T) {
 		{
 			name: "valid integer array input (cache hit)",
 			request: map[string]interface{}{
-				"input": []int{1, 2, 3, 4},
+				"input": []interface{}{1, 2, 3},
 				"model": "text-embedding-ada-002",
 			},
 			authHeader:   "Bearer " + validAPIKey,
 			wantStatus:   http.StatusOK,
-			wantCacheHit: true,
 			wantTokens:   0,
+			wantCacheHit: true,
+			setupCache:   true,
 		},
 		{
 			name: "valid float array input",
 			request: map[string]interface{}{
-				"input": []float64{1.5, 2.5, 3.5, 4.5},
+				"input": []interface{}{1.5, 2.5, 3.5},
 				"model": "text-embedding-ada-002",
 			},
 			authHeader:   "Bearer " + validAPIKey,
@@ -135,18 +140,19 @@ func TestHandleEmbeddings(t *testing.T) {
 		{
 			name: "valid float array input (cache hit)",
 			request: map[string]interface{}{
-				"input": []float64{1.5, 2.5, 3.5, 4.5},
+				"input": []interface{}{1.5, 2.5, 3.5},
 				"model": "text-embedding-ada-002",
 			},
 			authHeader:   "Bearer " + validAPIKey,
 			wantStatus:   http.StatusOK,
-			wantCacheHit: true,
 			wantTokens:   0,
+			wantCacheHit: true,
+			setupCache:   true,
 		},
 		{
 			name: "invalid array element type",
 			request: map[string]interface{}{
-				"input": []interface{}{"string", 1, 2.0},
+				"input": []interface{}{true, false}, // booleanは無効な型
 				"model": "text-embedding-ada-002",
 			},
 			authHeader:    "Bearer " + validAPIKey,
@@ -176,12 +182,16 @@ func TestHandleEmbeddings(t *testing.T) {
 			wantTokens:   0,
 		},
 		{
-			name:       "invalid method",
+			name:       "invalid_method",
+			method:     "GET",
+			path:       "/v1/embeddings",
 			request:    map[string]interface{}{},
 			wantStatus: http.StatusMethodNotAllowed,
 		},
 		{
-			name:       "invalid path",
+			name:       "invalid_path",
+			method:     "POST",
+			path:       "/v1/invalid",
 			request:    map[string]interface{}{},
 			wantStatus: http.StatusNotFound,
 		},
@@ -228,22 +238,50 @@ func TestHandleEmbeddings(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler := NewHandler(allowedModels, apiKeyPattern, ts.URL, db, false)
+			// 各テストケースで新しいハンドラーを作成
+			handler := NewHandler(
+				allowedModels,
+				apiKeyPattern,
+				ts.URL,
+				db,
+				false,
+			)
 
-			var body []byte
-			var err error
-			body, err = json.Marshal(tt.request)
+			// キャッシュの準備が必要な場合は、事前にリクエストを実行
+			if tt.setupCache {
+				body, err := json.Marshal(tt.request)
+				if err != nil {
+					t.Fatalf("Failed to marshal setup request: %v", err)
+				}
+
+				setupReq := httptest.NewRequest("POST", "/v1/embeddings", bytes.NewReader(body))
+				setupReq.Header.Set("Authorization", tt.authHeader)
+				setupReq.Header.Set("Content-Type", "application/json")
+				w := httptest.NewRecorder()
+				handler.ServeHTTP(w, setupReq)
+
+				if w.Code != http.StatusOK {
+					t.Fatalf("Cache setup failed with status code %d: %s", w.Code, w.Body.String())
+				}
+
+				// キャッシュのセットアップが完了するまで少し待つ
+				time.Sleep(100 * time.Millisecond)
+			}
+
+			// テストリクエストの実行
+			body, err := json.Marshal(tt.request)
 			if err != nil {
-				t.Fatalf("Failed to marshal request body: %v", err)
+				t.Fatalf("Failed to marshal request: %v", err)
 			}
 
-			method := "POST"
-			path := "/v1/embeddings"
-			if tt.name == "invalid method" {
-				method = "GET"
+			// メソッドとパスを指定
+			method := tt.method
+			if method == "" {
+				method = "POST"
 			}
-			if tt.name == "invalid path" {
-				path = "/v1/invalid"
+			path := tt.path
+			if path == "" {
+				path = "/v1/embeddings"
 			}
 
 			req := httptest.NewRequest(method, path, bytes.NewReader(body))

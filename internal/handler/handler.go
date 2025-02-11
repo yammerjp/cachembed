@@ -137,109 +137,130 @@ func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request, result *
 		return err
 	}
 
-	inputStr, err := processInput(req.Input)
+	// 入力をハッシュ化してキャッシュを確認
+	inputs, err := processInput(req.Input)
 	if err != nil {
 		result.status = http.StatusBadRequest
 		result.err = fmt.Errorf("invalid input: %w", err)
-		writeError(w, result.status, err.Error(), "invalid_request_error")
+		writeError(w, result.status, "Invalid input: "+err.Error(), "invalid_request_error")
 		return result.err
 	}
 
-	// 入力のハッシュを計算（文字列化した入力を使用）
-	inputHash := sha1.Sum([]byte(inputStr))
-	inputHashStr := hex.EncodeToString(inputHash[:])
-
-	// キャッシュをチェック
-	if cache, err := h.db.GetEmbedding(inputHashStr, req.Model); err != nil {
-		slog.Error("failed to query cache",
-			"error", err,
-			"input_hash", inputHashStr,
-			"model", req.Model,
-		)
-	} else if cache != nil {
-		// キャッシュヒット
-		slog.Debug("cache hit",
-			"input_hash", inputHashStr,
-			"model", req.Model,
-			"created_at", cache.CreatedAt,
-			"last_accessed", cache.LastAccessed,
-		)
-
-		// Format the embedding according to the requested format
-		formattedEmbedding := formatEmbedding(cache.EmbeddingData, req.EncodingFormat)
-
-		resp := upstream.EmbeddingResponse{
-			Object: "list",
-			Data: []struct {
-				Object    string      `json:"object"`
-				Embedding interface{} `json:"embedding"`
-				Index     int         `json:"index"`
-			}{
-				{
-					Object:    "embedding",
-					Embedding: formattedEmbedding,
-					Index:     0,
-				},
-			},
-			Model: req.Model,
-			Usage: struct {
-				PromptTokens int `json:"prompt_tokens"`
-				TotalTokens  int `json:"total_tokens"`
-			}{
-				// キャッシュヒット時はトークン数を0として報告
-				PromptTokens: 0,
-				TotalTokens:  0,
-			},
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		return json.NewEncoder(w).Encode(resp)
+	// レスポンスの準備
+	resp := &upstream.EmbeddingResponse{
+		Object: "list",
+		Data:   make([]upstream.EmbeddingData, len(inputs)),
+		Model:  req.Model,
+		Usage:  upstream.Usage{},
 	}
 
-	// キャッシュミス：upstreamにリクエスト
-	resp, err := h.upstream.CreateEmbedding(&req, r.Header.Get("Authorization"))
-	if err != nil {
-		if ue, ok := err.(*upstream.UpstreamError); ok {
-			result.status = ue.StatusCode
-			result.err = fmt.Errorf("upstream error: %w", err)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(ue.StatusCode)
-			json.NewEncoder(w).Encode(ue.Response)
+	// キャッシュミスした入力を収集
+	var missedInputs []string
+	var missedIndices []int
+
+	// 各入力に対してキャッシュを確認
+	for i, input := range inputs {
+		inputHash := sha1.Sum([]byte(input))
+		inputHashStr := hex.EncodeToString(inputHash[:])
+
+		cache, err := h.db.GetEmbedding(inputHashStr, req.Model)
+		if err != nil {
+			result.status = http.StatusInternalServerError
+			result.err = fmt.Errorf("failed to check cache: %w", err)
+			writeError(w, result.status, "Failed to check cache", "internal_error")
 			return result.err
 		}
-		result.status = http.StatusBadGateway
-		result.err = fmt.Errorf("upstream error: %w", err)
-		writeError(w, result.status, "Failed to reach upstream API: "+err.Error(), "upstream_error")
-		return result.err
+
+		if cache != nil {
+			// キャッシュヒットの場合
+			float64Embedding := make([]float64, len(cache.EmbeddingData))
+			for j, v := range cache.EmbeddingData {
+				float64Embedding[j] = float64(v)
+			}
+			resp.Data[i] = upstream.EmbeddingData{
+				Object:    "embedding",
+				Embedding: float64Embedding,
+				Index:     i,
+			}
+		} else {
+			// キャッシュミスの場合
+			missedInputs = append(missedInputs, input)
+			missedIndices = append(missedIndices, i)
+		}
 	}
 
-	// Store the original float32 embedding in cache
-	embedding, ok := convertToFloat32Slice(resp.Data[0].Embedding)
-	if !ok {
-		result.status = http.StatusInternalServerError
-		result.err = fmt.Errorf("unexpected embedding type from upstream")
-		writeError(w, result.status, "Unexpected embedding type from upstream", "internal_error")
-		return result.err
-	}
-	if err := h.db.StoreEmbedding(inputHashStr, req.Model, embedding); err != nil {
-		slog.Error("failed to store cache",
-			"error", err,
-			"input_hash", inputHashStr,
-			"model", req.Model,
-		)
+	// キャッシュミスがある場合、APIリクエストを実行
+	if len(missedInputs) > 0 {
+		missedReq := upstream.EmbeddingRequest{
+			Input:          missedInputs,
+			Model:          req.Model,
+			EncodingFormat: req.EncodingFormat,
+		}
+		missedResp, err := h.upstream.CreateEmbedding(&missedReq, r.Header.Get("Authorization"))
+		if err != nil {
+			if ue, ok := err.(*upstream.UpstreamError); ok {
+				result.status = ue.StatusCode
+				result.err = fmt.Errorf("upstream error: %w", err)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(ue.StatusCode)
+				json.NewEncoder(w).Encode(ue.Response)
+				return result.err
+			}
+			result.status = http.StatusBadGateway
+			result.err = fmt.Errorf("upstream error: %w", err)
+			writeError(w, result.status, "Failed to reach upstream API: "+err.Error(), "upstream_error")
+			return result.err
+		}
+
+		// APIレスポンスをキャッシュに保存し、レスポンスに組み込む
+		for i, data := range missedResp.Data {
+			embedding, ok := convertToFloat32Slice(data.Embedding)
+			if !ok {
+				result.status = http.StatusInternalServerError
+				result.err = fmt.Errorf("unexpected embedding type from upstream at index %d", i)
+				writeError(w, result.status, "Unexpected embedding type from upstream", "internal_error")
+				return result.err
+			}
+
+			// キャッシュに保存
+			inputHash := sha1.Sum([]byte(missedInputs[i]))
+			inputHashStr := hex.EncodeToString(inputHash[:])
+			if err := h.db.StoreEmbedding(inputHashStr, req.Model, embedding); err != nil {
+				slog.Error("failed to store cache",
+					"error", err,
+					"input_hash", inputHashStr,
+					"model", req.Model,
+					"index", i,
+				)
+			}
+
+			// レスポンスに組み込む
+			originalIndex := missedIndices[i]
+			resp.Data[originalIndex] = upstream.EmbeddingData{
+				Object:    "embedding",
+				Embedding: data.Embedding,
+				Index:     originalIndex,
+			}
+		}
+
+		// 使用量を記録
+		resp.Usage = missedResp.Usage
+		result.promptTokens = missedResp.Usage.PromptTokens
+		result.totalTokens = missedResp.Usage.TotalTokens
 	}
 
-	// Format the response according to the requested format if needed
+	// base64エンコーディングが要求された場合の処理
 	if req.EncodingFormat == "base64" {
-		formattedEmbedding := float32ToBase64(embedding)
-		resp.Data[0].Embedding = formattedEmbedding
+		for i, data := range resp.Data {
+			embedding, ok := convertToFloat32Slice(data.Embedding)
+			if ok {
+				resp.Data[i].Embedding = float32ToBase64(embedding)
+			}
+		}
 	}
 
 	// 成功時のメタデータを記録
 	result.status = http.StatusOK
-	result.promptTokens = resp.Usage.PromptTokens
-	result.totalTokens = resp.Usage.TotalTokens
 
 	// レスポンスを返す
 	w.Header().Set("Content-Type", "application/json")
