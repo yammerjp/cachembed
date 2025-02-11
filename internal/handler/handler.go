@@ -163,7 +163,16 @@ func (h *Handler) inHandleRequest(w http.ResponseWriter, r *http.Request) error 
 	missedIndexes := make([]int, 0)
 	usage := upstream.Usage{}
 	for i, hash := range hashes {
-		slog.Info("check cache", "hash", hash, "model", req.Model)
+		// pickedInput, err := input.PickInputs([]int{i})
+		// if err != nil {
+		// 	return NewHandlerError(
+		// 		http.StatusInternalServerError,
+		// 		"Failed to pick inputs",
+		// 		"internal_error",
+		// 		err,
+		// 	)
+		// }
+		// slog.Info("check cache", "hash", hash, "model", req.Model, "input", pickedInput)
 		cache, err := h.db.GetEmbedding(hash, req.Model)
 		if err != nil {
 			return NewHandlerError(

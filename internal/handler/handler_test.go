@@ -61,7 +61,7 @@ func TestHandleRequest(t *testing.T) {
 					Data: []upstream.EmbeddingData{
 						{
 							Object:    "embedding",
-							Embedding: dummyVecBase64Str,
+							Embedding: base64Dummy1,
 							Index:     0,
 						},
 					},
@@ -80,7 +80,7 @@ func TestHandleRequest(t *testing.T) {
 					Data: []upstream.EmbeddingData{
 						{
 							Object:    "embedding",
-							Embedding: dummyVec,
+							Embedding: vecDummy1,
 							Index:     0,
 						},
 					},
@@ -120,7 +120,7 @@ func TestHandleRequest(t *testing.T) {
 					Data: []upstream.EmbeddingData{
 						{
 							Object:    "embedding",
-							Embedding: dummyVecBase64Str,
+							Embedding: base64Dummy1,
 							Index:     0,
 						},
 					},
@@ -139,7 +139,7 @@ func TestHandleRequest(t *testing.T) {
 					Data: []upstream.EmbeddingData{
 						{
 							Object:    "embedding",
-							Embedding: dummyVecBase64Str,
+							Embedding: base64Dummy1,
 							Index:     0,
 						},
 					},
@@ -182,6 +182,245 @@ func TestHandleRequest(t *testing.T) {
 					Usage: upstream.Usage{
 						PromptTokens: 0,
 						TotalTokens:  0,
+					},
+				},
+			},
+		},
+		{
+			name: "token sequence input",
+			request: Request{
+				Input: []int{1, 2, 3, 4},
+				Model: "text-embedding-ada-002",
+			},
+			mockUpstream: mockUpstream{
+				expectedInput:  []interface{}{float64(1), float64(2), float64(3), float64(4)},
+				expectedFormat: "base64",
+				mockResponse: &upstream.EmbeddingResponse{
+					Object: "list",
+					Data: []upstream.EmbeddingData{
+						{
+							Object:    "embedding",
+							Embedding: base64Dummy1,
+							Index:     0,
+						},
+					},
+					Model: "text-embedding-ada-002",
+					Usage: upstream.Usage{
+						PromptTokens: 4,
+						TotalTokens:  4,
+					},
+				},
+				callCount: new(int),
+			},
+			expectedResponse: expectedResponse{
+				status: http.StatusOK,
+				body: &upstream.EmbeddingResponse{
+					Object: "list",
+					Data: []upstream.EmbeddingData{
+						{
+							Object:    "embedding",
+							Embedding: vecDummy1,
+							Index:     0,
+						},
+					},
+					Model: "text-embedding-ada-002",
+					Usage: upstream.Usage{
+						PromptTokens: 4,
+						TotalTokens:  4,
+					},
+				},
+			},
+		},
+		{
+			name: "string array input",
+			request: Request{
+				Input:          []string{"Hello", "World"},
+				Model:          "text-embedding-ada-002",
+				EncodingFormat: "base64",
+			},
+			mockUpstream: mockUpstream{
+				expectedInput:  []interface{}{"Hello", "World"},
+				expectedFormat: "base64",
+				mockResponse: &upstream.EmbeddingResponse{
+					Object: "list",
+					Data: []upstream.EmbeddingData{
+						{
+							Object:    "embedding",
+							Embedding: base64Dummy1,
+							Index:     0,
+						},
+						{
+							Object:    "embedding",
+							Embedding: base64Dummy2,
+							Index:     1,
+						},
+					},
+					Model: "text-embedding-ada-002",
+					Usage: upstream.Usage{
+						PromptTokens: 2,
+						TotalTokens:  2,
+					},
+				},
+				callCount: new(int),
+			},
+			expectedResponse: expectedResponse{
+				status:         http.StatusOK,
+				encodingFormat: "base64",
+				body: &upstream.EmbeddingResponse{
+					Object: "list",
+					Data: []upstream.EmbeddingData{
+						{
+							Object:    "embedding",
+							Embedding: base64Dummy1,
+							Index:     0,
+						},
+						{
+							Object:    "embedding",
+							Embedding: base64Dummy2,
+							Index:     1,
+						},
+					},
+					Model: "text-embedding-ada-002",
+					Usage: upstream.Usage{
+						PromptTokens: 2,
+						TotalTokens:  2,
+					},
+				},
+			},
+		},
+		{
+			name: "partial_cache_hit_with_string_array",
+			initialData: []InitialData{
+				{
+					inputHash: "70c07ec18ef89c5309bbb0937f3a6342411e1fdd", // "World"のハッシュ
+					model:     "text-embedding-ada-002",
+					embedding: []float32{0.125, 0.25, 0.5},
+				},
+			},
+			request: Request{
+				Input: []string{"Hello", "World"},
+				Model: "text-embedding-ada-002",
+			},
+			mockUpstream: mockUpstream{
+				expectedInput:  []interface{}{"Hello"}, // キャッシュミスの部分のみupstreamに送信
+				expectedFormat: "base64",
+				mockResponse: &upstream.EmbeddingResponse{
+					Object: "list",
+					Data: []upstream.EmbeddingData{
+						{
+							Object:    "embedding",
+							Embedding: base64Dummy1,
+							Index:     0,
+						},
+					},
+					Model: "text-embedding-ada-002",
+					Usage: upstream.Usage{
+						PromptTokens: 1,
+						TotalTokens:  1,
+					},
+				},
+				callCount: new(int),
+			},
+			expectedResponse: expectedResponse{
+				status: http.StatusOK,
+				body: &upstream.EmbeddingResponse{
+					Object: "list",
+					Data: []upstream.EmbeddingData{
+						{
+							Object:    "embedding",
+							Embedding: vecDummy1,
+							Index:     0,
+						},
+						{
+							Object:    "embedding",
+							Embedding: []float32{0.125, 0.25, 0.5},
+							Index:     1,
+						},
+					},
+					Model: "text-embedding-ada-002",
+					Usage: upstream.Usage{
+						PromptTokens: 1,
+						TotalTokens:  1,
+					},
+				},
+			},
+		},
+		{
+			name: "token_sequences_input_with_partial_cache",
+			initialData: []InitialData{
+				{
+					inputHash: "ef510977d15a2498e88750ef53092291499b5e83", // [3, 4]
+					model:     "text-embedding-ada-002",
+					embedding: []float32{0.4, 0.5, 0.6},
+				},
+				{
+					inputHash: "b8b9b72a24e33fac417a60f2064434b95d408eda", // [7, 8]
+					model:     "text-embedding-ada-002",
+					embedding: []float32{0.4, 0.5, 0.6},
+				},
+			},
+			request: Request{
+				Input: [][]int{{1, 2}, {3, 4}, {5, 6}, {7, 8}},
+				Model: "text-embedding-ada-002",
+			},
+			mockUpstream: mockUpstream{
+				expectedInput: []interface{}{
+					[]interface{}{float64(1), float64(2)},
+					[]interface{}{float64(5), float64(6)},
+				},
+				expectedFormat: "base64",
+				mockResponse: &upstream.EmbeddingResponse{
+					Object: "list",
+					Data: []upstream.EmbeddingData{
+						{
+							Object:    "embedding",
+							Embedding: base64Dummy1,
+							Index:     0,
+						},
+						{
+							Object:    "embedding",
+							Embedding: base64Dummy2,
+							Index:     1,
+						},
+					},
+					Model: "text-embedding-ada-002",
+					Usage: upstream.Usage{
+						PromptTokens: 4,
+						TotalTokens:  4,
+					},
+				},
+				callCount: new(int),
+			},
+			expectedResponse: expectedResponse{
+				status: http.StatusOK,
+				body: &upstream.EmbeddingResponse{
+					Object: "list",
+					Data: []upstream.EmbeddingData{
+						{
+							Object:    "embedding",
+							Embedding: vecDummy1,
+							Index:     0,
+						},
+						{
+							Object:    "embedding",
+							Embedding: []float32{0.4, 0.5, 0.6},
+							Index:     1,
+						},
+						{
+							Object:    "embedding",
+							Embedding: vecDummy2,
+							Index:     2,
+						},
+						{
+							Object:    "embedding",
+							Embedding: []float32{0.4, 0.5, 0.6},
+							Index:     3,
+						},
+					},
+					Model: "text-embedding-ada-002",
+					Usage: upstream.Usage{
+						PromptTokens: 4,
+						TotalTokens:  4,
 					},
 				},
 			},
