@@ -13,13 +13,15 @@ import (
 
 // Client はOpenAI APIクライアントの構造体
 type Client struct {
-	baseURL string
+	httpClient *http.Client
+	baseURL    string
 }
 
 // NewClient は新しいClientを作成します
-func NewClient(baseURL string) *Client {
+func NewClient(httpClient *http.Client, baseURL string) *Client {
 	return &Client{
-		baseURL: baseURL,
+		httpClient: httpClient,
+		baseURL:    baseURL,
 	}
 }
 
@@ -38,8 +40,7 @@ func (c *Client) CreateEmbedding(req *EmbeddingRequest, authHeader string) (*Emb
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", authHeader)
 
-	client := &http.Client{}
-	resp, err := client.Do(httpReq)
+	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request: %w", err)
 	}

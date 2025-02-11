@@ -86,7 +86,7 @@ func TestCreateEmbedding(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client := NewClient(ts.URL)
+			client := NewClient(http.DefaultClient, ts.URL)
 			resp, err := client.CreateEmbedding(tt.request, tt.authHeader)
 
 			if tt.wantError {

@@ -40,7 +40,7 @@ func runServer(cmd ServeCmd, dsn string, debugBody bool) {
 	}
 
 	// upstreamクライアントの作成
-	upstreamClient := upstream.NewClient(cmd.UpstreamURL)
+	upstreamClient := upstream.NewClient(http.DefaultClient, cmd.UpstreamURL)
 
 	// ハンドラの作成
 	handler := handler.NewHandler(
