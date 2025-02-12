@@ -2,9 +2,9 @@ require "net/http"
 require "uri"
 
 class UpstreamClient
-  URL = ENV.fetch("CACHEMBED_UPSTREAM_URL", "https://api.openai.com/v1/embeddings")
+  URL = ENV.fetch('CACHEMBED_UPSTREAM_URL', 'https://api.openai.com/v1/embeddings')
 
-  attr_accessor :api_key, :response
+  attr_accessor :api_key
 
   def initialize(api_key:, model:, dimensions:, targets:)
     @api_key = api_key
@@ -14,49 +14,30 @@ class UpstreamClient
   end
 
   def request_body
-    b = {
+    body = {
       model: @model,
       input: @targets.map(&:to_hash),
-      encoding_format: "base64"
+      encoding_format: 'base64'
     }
-    if @dimensions.present?
-      b[:dimensions] = @dimensions
-    end
-    b
+    body[:dimensions] = @dimensions if @dimensions.present?
+    body
   end
 
   def post
-    uri = URI.parse(URL)
-    req = Net::HTTP::Post.new(uri.path)
-    req["Authorization"] = "Bearer #{@api_key}"
-    req["Content-Type"] = "application/json"
-    req.body = request_body.to_json
-
-    response = Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https") do |http|
-      http.request(req)
-    end
-    if response.code != "200"
-      raise "Failed to get embedding from upstream: #{response.code}: #{response.body}"
+    conn = Faraday.new(url: URL) do |faraday|
+      faraday.request :json
+      faraday.response :json, parser_options: { symbolize_names: true }
+      faraday.adapter Faraday.default_adapter
     end
 
-    @response = JSON.parse(response.body).deep_symbolize_keys
-  end
-
-  def save_response_to_vector!
-    vectors = @targets.map.with_index do |target, index|
-      VectorCache.new(
-        input_hash: target.sha1sum,
-        model: @model,
-        dimensions: @dimensions || VectorCache::DEFAULT_DIMENSIONS,
-        content: Base64.decode64(@response[:data][index][:embedding]),
-      )
+    response = conn.post do |req|
+      req.headers['Authorization'] = "Bearer #{@api_key}"
+      req.headers['Content-Type'] = 'application/json'
+      req.body = request_body
     end
 
-    VectorCache.import vectors
-    vectors
-  end
+    raise "Failed to get embedding from upstream: #{response.status}: #{response.body}" unless response.success?
 
-  def usage
-    @response[:usage]
+    UpstreamResponse.new(response.body, @targets)
   end
 end
