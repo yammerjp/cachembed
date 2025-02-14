@@ -26,3 +26,4 @@ Things you may want to cover:
 ## TODO
 
 - save default dimensions for each model
+- LRU cache (with request logs)
