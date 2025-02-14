@@ -36,8 +36,10 @@ class UpstreamClient
       req.body = request_body
     end
 
+    json_response = JSON.parse(response.body, symbolize_names: true)
+
     raise "Failed to get embedding from upstream: #{response.status}: #{response.body}" unless response.success?
 
-    UpstreamResponse.new(body: response.body, targets: @targets, model: @model, dimensions: @dimensions)
+    UpstreamResponse.new(body: json_response, targets: @targets, model: @model, dimensions: @dimensions)
   end
 end

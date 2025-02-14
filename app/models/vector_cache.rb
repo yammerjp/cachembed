@@ -3,13 +3,15 @@ require "base64"
 class VectorCache < ApplicationRecord
   DEFAULT_DIMENSIONS = 0
 
-  validates :sha1sum, presence: true, uniqueness: true
-  validates :embedding, presence: true
+  validates :input_hash, presence: true, uniqueness: true
+  validates :content, presence: true
   validates :model, presence: true
   validates :dimensions, presence: true
 
   def self.import_from_response!(response)
-    self.insert_all(response.vector_cache_hashes)
+    response.vector_cache_hashes.map do |hash|
+      self.create!(hash)
+    end
   end
 
   def base64_content

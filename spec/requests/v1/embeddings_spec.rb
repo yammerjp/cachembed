@@ -9,8 +9,8 @@ RSpec.describe "V1::Embeddings", type: :request do
       before do
         build_stub_request(
           model: "text-embedding-ada-002",
-          input: ["Hello, world!"],
-          base64s: ["AAAAPgAAgD4AAAA/"],
+          input: [ "Hello, world!" ],
+          base64s: [ "AAAAPgAAgD4AAAA/" ],
         )
       end
 
@@ -21,7 +21,7 @@ RSpec.describe "V1::Embeddings", type: :request do
         }, params: {
           embedding: {
             model: "text-embedding-ada-002",
-            input: "Hello, world!",
+            input: "Hello, world!"
           }
         }.to_json
       end
@@ -34,11 +34,11 @@ RSpec.describe "V1::Embeddings", type: :request do
       before do
         build_stub_request(
           model: "text-embedding-ada-002",
-          input: ["Hello, world!", "Goodbye, world!"],
-          base64s: ["AAAAPgAAgD4AAAA/", "AADAPgAAQD8AAGA/"],
+          input: [ "Hello, world!", "Goodbye, world!" ],
+          base64s: [ "AAAAPgAAgD4AAAA/", "AADAPgAAQD8AAGA/" ],
         )
       end
-      
+
       it "returns a 200 status code" do
         post v1_embeddings_path, headers: {
           "Authorization" => "Bearer sk-abc123",
@@ -46,21 +46,21 @@ RSpec.describe "V1::Embeddings", type: :request do
         }, params: {
           embedding: {
             model: "text-embedding-ada-002",
-            input: ["Hello, world!", "Goodbye, world!"],
+            input: [ "Hello, world!", "Goodbye, world!" ]
           }
         }.to_json
-      end 
+      end
     end
 
     context "input is integer array" do
       before do
         build_stub_request(
           model: "text-embedding-ada-002",
-          input: [[1, 2, 3]],
-          base64s: ["AAAAPgAAgD4AAAA/"],
+          input: [ [ 1, 2, 3 ] ],
+          base64s: [ "AAAAPgAAgD4AAAA/" ],
         )
       end
-      
+
       it "returns a 200 status code" do
         post v1_embeddings_path, headers: {
           "Authorization" => "Bearer sk-abc123",
@@ -68,7 +68,7 @@ RSpec.describe "V1::Embeddings", type: :request do
         }, params: {
           embedding: {
             model: "text-embedding-ada-002",
-            input: [1, 2, 3],
+            input: [ 1, 2, 3 ]
           }
         }.to_json
       end
@@ -78,11 +78,11 @@ RSpec.describe "V1::Embeddings", type: :request do
       before do
         build_stub_request(
           model: "text-embedding-ada-002",
-          input: [[1, 2], [3, 4]],
-          base64s: ["AAAAPgAAgD4AAAA/", "AADAPgAAQD8AAGA/"],
+          input: [ [ 1, 2 ], [ 3, 4 ] ],
+          base64s: [ "AAAAPgAAgD4AAAA/", "AADAPgAAQD8AAGA/" ],
         )
       end
-      
+
       it "returns a 200 status code" do
         post v1_embeddings_path, headers: {
           "Authorization" => "Bearer sk-abc123",
@@ -91,10 +91,10 @@ RSpec.describe "V1::Embeddings", type: :request do
           embedding: {
             model: "text-embedding-ada-002",
             input: [
-              [1, 2],
-              [3, 4]
-            ],
-          } 
+              [ 1, 2 ],
+              [ 3, 4 ]
+            ]
+          }
         }.to_json
       end
     end
@@ -108,12 +108,12 @@ RSpec.describe "V1::Embeddings", type: :request do
           "Accept-Encoding" => "gzip;q=1.0,deflate;q=0.6,identity;q=0.3",
           "Authorization" => "Bearer sk-abc123",
           "Content-Type" => "application/json",
-          "User-Agent" => "Ruby"
+          "User-Agent" => "Faraday v2.12.2"
         },
         body: {
           model: model,
           input: input,
-          encoding_format: "base64",
+          encoding_format: "base64"
         }.to_json
       )
       .to_return(status: 200, body: {

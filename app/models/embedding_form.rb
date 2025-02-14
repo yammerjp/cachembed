@@ -3,6 +3,7 @@ class EmbeddingForm
   include ActiveModel::Attributes
 
   attr_accessor :model, :dimensions, :encoding_format, :api_key, :targets, :input
+  attr_reader :prompt_tokens, :total_tokens
 
   MODEL_NAMES = %w[text-embedding-ada-002 text-embedding-3-small text-embedding-3-large].freeze
   ENCODING_FORMATS = %w[float base64].freeze
@@ -26,13 +27,12 @@ class EmbeddingForm
     embedding_by_sha1sum = {}
 
     cached_targets.each do |cached_target|
-      embedding_by_sha1sum[cached_target.input_hash] = cached_target.formatted_content(encoding_format)
+      embedding_by_sha1sum[cached_target.sha1sum] = cached_target.formatted_content(encoding_format)
     end
 
     if upstream_targets.any?
       response = upstream_client.post
       upstream_vectors = VectorCache.import_from_response!(response)
-
       @prompt_tokens = response.prompt_tokens
       @total_tokens = response.total_tokens
 
