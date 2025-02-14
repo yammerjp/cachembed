@@ -2,7 +2,7 @@ require "net/http"
 require "uri"
 
 class UpstreamClient
-  URL = ENV.fetch('CACHEMBED_UPSTREAM_URL', 'https://api.openai.com/v1/embeddings')
+  URL = ENV.fetch("CACHEMBED_UPSTREAM_URL", "https://api.openai.com/v1/embeddings")
 
   attr_accessor :api_key
 
@@ -17,7 +17,7 @@ class UpstreamClient
     body = {
       model: @model,
       input: @targets.map(&:to_hash),
-      encoding_format: 'base64'
+      encoding_format: "base64"
     }
     body[:dimensions] = @dimensions if @dimensions.present?
     body
@@ -31,13 +31,13 @@ class UpstreamClient
     end
 
     response = conn.post do |req|
-      req.headers['Authorization'] = "Bearer #{@api_key}"
-      req.headers['Content-Type'] = 'application/json'
+      req.headers["Authorization"] = "Bearer #{@api_key}"
+      req.headers["Content-Type"] = "application/json"
       req.body = request_body
     end
 
     raise "Failed to get embedding from upstream: #{response.status}: #{response.body}" unless response.success?
 
-    UpstreamResponse.new(response.body, @targets)
+    UpstreamResponse.new(body: response.body, targets: @targets, model: @model, dimensions: @dimensions)
   end
 end

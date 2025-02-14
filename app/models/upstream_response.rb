@@ -1,17 +1,30 @@
-class UpstreamResponse
-  attr_reader :data, :targets, :model, :dimensions
+require "base64"
 
-  def initialize(response_body, targets)
-    @data = response_body[:data] || []
+class UpstreamResponse
+  def initialize(body:, targets:, model:, dimensions:)
+    @body = body
     @targets = targets
-    @model = response_body[:model]
-    @dimensions = response_body[:dimensions]
+    @model = model
+    @dimensions = dimensions
   end
 
   # targets の順番に対応した sha1sum と embedding のペアを返す
-  def vectors
-    targets.zip(data).map do |target, item|
-      [target.sha1sum, item[:embedding]]
+  def vector_cache_hashes
+    @targets.zip(@body[:data]).map do |target, item|
+      {
+        input_hash: target.sha1sum,
+        content: Base64.strict_decode64(item[:embedding]),
+        model: @model,
+        dimensions: @dimensions || VectorCache::DEFAULT_DIMENSIONS
+      }
     end
+  end
+
+  def prompt_tokens
+    @body[:usage][:prompt_tokens]
+  end
+
+  def total_tokens
+    @body[:usage][:total_tokens]
   end
 end

@@ -1,14 +1,14 @@
-json.object @embedding[:object]
+json.object "list"
 
-json.data @embedding[:data] do |data|
-  json.object data[:object]
-  json.embedding data[:embedding]
-  json.index data[:index]
+json.data @embeddings do |data, index|
+  json.object "embedding"
+  json.embedding data
+  json.index index
 end
 
-json.model @embedding[:model]
+json.model @model
 
 json.usage do
-  json.prompt_tokens @embedding[:usage][:prompt_tokens]
-  json.total_tokens @embedding[:usage][:total_tokens]
-end 
+  json.prompt_tokens @prompt_tokens
+  json.total_tokens @total_tokens
+end

@@ -2,7 +2,7 @@ class EmbeddingForm
   include ActiveModel::Model
   include ActiveModel::Attributes
 
-  attr_accessor :model, :dimensions, :encoding_format, :api_key, :targets
+  attr_accessor :model, :dimensions, :encoding_format, :api_key, :targets, :input
 
   MODEL_NAMES = %w[text-embedding-ada-002 text-embedding-3-small text-embedding-3-large].freeze
   ENCODING_FORMATS = %w[float base64].freeze
@@ -23,8 +23,35 @@ class EmbeddingForm
   def save!
     raise ActiveRecord::RecordInvalid.new(self) unless valid?
 
-    response = upstream_client.post
-    VectorCache.import_from_response!(response)
+    embedding_by_sha1sum = {}
+
+    cached_targets.each do |cached_target|
+      embedding_by_sha1sum[cached_target.input_hash] = cached_target.formatted_content(encoding_format)
+    end
+
+    if upstream_targets.any?
+      response = upstream_client.post
+      upstream_vectors = VectorCache.import_from_response!(response)
+
+      @prompt_tokens = response.prompt_tokens
+      @total_tokens = response.total_tokens
+
+      upstream_vectors.each do |vector|
+        embedding_by_sha1sum[vector.input_hash] = vector.formatted_content(encoding_format)
+      end
+    end
+
+    targets.map do |target|
+      embedding_by_sha1sum[target.sha1sum]
+    end
+  end
+
+  def cached_targets
+    VectorCache.where(input_hash: targets.map(&:sha1sum), model: model, dimensions: dimensions).pluck(:input_hash)
+  end
+
+  def upstream_targets
+    targets.reject { |target| cached_targets.include?(target.sha1sum) }
   end
 
   private
@@ -34,7 +61,7 @@ class EmbeddingForm
       api_key: api_key,
       model: model,
       dimensions: dimensions,
-      targets: targets
+      targets: upstream_targets,
     )
   end
 end
