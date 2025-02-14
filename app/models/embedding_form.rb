@@ -19,6 +19,8 @@ class EmbeddingForm
     super
     self.encoding_format ||= DEFAULT_ENCODING_FORMAT
     self.targets = EmbeddingTarget.build_targets!(attributes[:input])
+    @prompt_tokens = 0
+    @total_tokens = 0
   end
 
   def save!
@@ -26,8 +28,8 @@ class EmbeddingForm
 
     embedding_by_sha1sum = {}
 
-    cached_targets.each do |cached_target|
-      embedding_by_sha1sum[cached_target.sha1sum] = cached_target.formatted_content(encoding_format)
+    cached_vectors.each do |cached_vector|
+      embedding_by_sha1sum[cached_vector.input_hash] = cached_vector.formatted_content(encoding_format)
     end
 
     if upstream_targets.any?
@@ -46,12 +48,13 @@ class EmbeddingForm
     end
   end
 
-  def cached_targets
-    VectorCache.where(input_hash: targets.map(&:sha1sum), model: model, dimensions: dimensions).pluck(:input_hash)
+  def cached_vectors
+    VectorCache.where(input_hash: targets.map(&:sha1sum), model: model, dimensions: dimensions || 0).all
   end
 
   def upstream_targets
-    targets.reject { |target| cached_targets.include?(target.sha1sum) }
+    cached_sha1sums = cached_vectors.map(&:input_hash)
+    targets.reject { |target| cached_sha1sums.include?(target.sha1sum) }
   end
 
   private

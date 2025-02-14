@@ -4,30 +4,49 @@ require 'webmock/rspec'
 RSpec.describe "V1::Embeddings", type: :request do
   describe "POST /create" do
     context "input is string" do
-      # mock upstream http request
-      # validate upstream http request
-      before do
-        build_stub_request(
-          model: "text-embedding-ada-002",
-          input: [ "Hello, world!" ],
-          base64s: [ "AAAAPgAAgD4AAAA/" ],
-        )
-      end
-
-      it "returns a 200 status code" do
-        post v1_embeddings_path, headers: {
-          "Authorization" => "Bearer sk-abc123",
-          "Content-Type" => "application/json"
-        }, params: {
-          embedding: {
+      context 'without cache' do
+        # mock upstream http request
+        # validate upstream http request
+        before do
+          build_stub_request(
             model: "text-embedding-ada-002",
-            input: "Hello, world!"
-          }
-        }.to_json
+            input: [ "Hello, world!" ],
+            base64s: [ "AAAAPgAAgD4AAAA/" ],
+          )
+        end
+
+        it "returns a 200 status code" do
+          post v1_embeddings_path, headers: {
+            "Authorization" => "Bearer sk-abc123",
+            "Content-Type" => "application/json"
+          }, params: {
+            embedding: {
+              model: "text-embedding-ada-002",
+              input: "Hello, world!"
+            }
+          }.to_json
+        end
+        # TODO: validate response structure
+        # expect(response).to be_successful
       end
 
-      # TODO: validate response structure
-      # expect(response).to be_successful
+      context 'with cache' do
+        before do
+          VectorCache.create!(input_hash: "943a702d06f34599aee1f8da8ef9f7296031d699", content: "AAAAPgAAgD4AAAA/", model: "text-embedding-ada-002", dimensions: 0)
+        end
+
+        it "returns a 200 status code" do
+          post v1_embeddings_path, headers: {
+            "Authorization" => "Bearer sk-abc123",
+            "Content-Type" => "application/json"
+          }, params: {
+            embedding: {
+              model: "text-embedding-ada-002",
+              input: "Hello, world!"
+            }
+          }.to_json
+        end
+      end
     end
 
     context "input is string array" do
