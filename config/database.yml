@@ -9,15 +9,17 @@ default: &default
   timeout: 5000
 
 development:
-  <<: *default
-  url: <%= ENV.fetch('DATABASE_URL', 'sqlite3:storage/development.sqlite3') %>
+  primary:
+    <<: *default
+    url: <%= ENV.fetch('DATABASE_URL', 'sqlite3:storage/development.sqlite3') %>
 
 # Warning: The database defined as "test" will be erased and
 # re-generated from your development database when you run "rake".
 # Do not set this db to the same as development or production.
 test:
-  <<: *default
-  url: <%= ENV.fetch('DATABASE_URL', 'sqlite3:storage/test.sqlite3') %>
+  primary:
+    <<: *default
+    url: <%= ENV.fetch('DATABASE_URL', 'sqlite3:storage/test.sqlite3') %>
 
 
 # SQLite3 write its data on the local filesystem, as such it requires
@@ -27,5 +29,6 @@ test:
 # Similarly, if you deploy your application as a Docker container, you must
 # ensure the database is located in a persisted volume.
 production:
-  <<: *default
-  url: <%= ENV.fetch('DATABASE_URL', 'sqlite3:storage/production.sqlite3') %>
+  primary:
+    <<: *default
+    url: <%= ENV.fetch('DATABASE_URL', 'sqlite3:storage/production.sqlite3') %>
