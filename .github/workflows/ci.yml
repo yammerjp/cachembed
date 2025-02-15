@@ -44,7 +44,7 @@ jobs:
       matrix:
         database:
           - "sqlite3:storage/test.sqlite3"
-          - "postgresql://postgres:postgres@localhost:5432/postgres"
+          - "postgresql://postgres:postgres@localhost:5432/cachembed_test"
     services:
       postgres:
         image: postgres:17
@@ -53,8 +53,8 @@ jobs:
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: postgres
-        options: --health-cmd "pg_isready -U postgres -d postgres" --health-interval 10s --health-timeout 5s --health-retries 5
+          POSTGRES_DB: cachembed_test
+        options: --health-cmd "pg_isready -U postgres -d cachembed_test" --health-interval 10s --health-timeout 5s --health-retries 5
 
     steps:
       - name: Install packages
@@ -75,5 +75,5 @@ jobs:
           DATABASE_URL: ${{ matrix.database }}
         run: |
           bundle install --with=postgresql
-          bin/rails db:test:prepare
+          bin/rails db:schema:load
           bin/bundle exec rspec
