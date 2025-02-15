@@ -12,7 +12,6 @@ Cachembed is a proxy server that caches OpenAI embedding API results to reduce r
 - Proxies requests to OpenAI API (https://api.openai.com/v1/embeddings by default)
 - Supports API key validation via regex pattern
 - Restricts usage to allowed embedding models
-- Provides garbage collection (GC) for cache cleanup
 - Supports database migrations
 - Configurable via environment variables
 
@@ -67,12 +66,6 @@ Production environment:
 
     RAILS_ENV=production rails server
 
-### Running Garbage Collection (GC)
-
-Use the rake task to delete old cache entries:
-
-    rails cache:gc[7.days]  # Deletes entries older than 7 days
-
 ### API Endpoints
 
 The server provides the following endpoint:
@@ -106,3 +99,4 @@ Pull requests are welcome! If you find a bug or want to request a feature, pleas
 ## TODO
 
 - LRU cache (with request logs)
+- Garbage collection for old cache entries
