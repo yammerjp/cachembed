@@ -38,14 +38,26 @@ jobs:
         run: bin/rubocop -f github
 
   test:
+    matrix:
+      database:
+        - name: SQLite
+          DATABASE_URL: sqlite3:storage/test.sqlite3
+        - name: PostgreSQL
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+
     runs-on: ubuntu-latest
 
-    # services:
-    #  redis:
-    #    image: redis
-    #    ports:
-    #      - 6379:6379
-    #    options: --health-cmd "redis-cli ping" --health-interval 10s --health-timeout 5s --health-retries 5
+    services:
+      postgres:
+        image: postgres:17
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        options: --health-cmd "pg_isready -U postgres -d postgres" --health-interval 10s --health-timeout 5s --health-retries 5
+
     steps:
       - name: Install packages
         run: sudo apt-get update && sudo apt-get install --no-install-recommends -y build-essential git pkg-config google-chrome-stable
@@ -62,15 +74,8 @@ jobs:
       - name: Run tests
         env:
           RAILS_ENV: test
-          # REDIS_URL: redis://localhost:6379/0
+          DATABASE_URL: ${{ matrix.database.DATABASE_URL }}
         run: |
+          bundle install --with=postgresql
           bin/rails db:test:prepare
           bin/bundle exec rspec
-
-      - name: Keep screenshots from failed system tests
-        uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: screenshots
-          path: ${{ github.workspace }}/tmp/screenshots
-          if-no-files-found: ignore
