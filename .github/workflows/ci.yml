@@ -3,7 +3,8 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [ main ]
+    branches:
+      - main
 
 jobs:
   scan_ruby:
@@ -38,15 +39,13 @@ jobs:
         run: bin/rubocop -f github
 
   test:
-    matrix:
-      database:
-        - name: SQLite
-          DATABASE_URL: sqlite3:storage/test.sqlite3
-        - name: PostgreSQL
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
-
     runs-on: ubuntu-latest
-
+    matrix:
+      strategy:
+        matrix:
+          database:
+            - "sqlite3:storage/test.sqlite3"
+            - "postgresql://postgres:postgres@localhost:5432/postgres"
     services:
       postgres:
         image: postgres:17
@@ -74,7 +73,7 @@ jobs:
       - name: Run tests
         env:
           RAILS_ENV: test
-          DATABASE_URL: ${{ matrix.database.DATABASE_URL }}
+          DATABASE_URL: ${{ matrix.database }}
         run: |
           bundle install --with=postgresql
           bin/rails db:test:prepare
