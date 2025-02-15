@@ -23,9 +23,9 @@ RSpec.describe UpstreamResponse do
       }
     end
 
-    subject(:response) { described_class.new(body: body, targets: [ target ], model: model, dimensions: dimensions) }
+    subject(:response) { described_class.new(body: body, targets: [ target ], model: model) }
 
-    it 'returns array of hash with input_hash, content, model and dimensions' do
+    it 'returns array of hash with input_hash, content, model' do
       result = response.vector_cache_hashes
       expect(result).to be_an(Array)
       expect(result.size).to eq(1)
@@ -34,18 +34,9 @@ RSpec.describe UpstreamResponse do
       expect(hash).to include(
         input_hash: target.sha1sum,
         model: model,
-        dimensions: VectorCache::DEFAULT_DIMENSIONS
+        dimensions: 3,
       )
       expect(hash[:content]).to be_a(String)
-    end
-
-    context 'when dimensions is specified' do
-      let(:dimensions) { 1536 }
-
-      it 'uses specified dimensions' do
-        result = response.vector_cache_hashes
-        expect(result.first[:dimensions]).to eq(dimensions)
-      end
     end
 
     context 'when multiple targets are given' do
@@ -73,7 +64,7 @@ RSpec.describe UpstreamResponse do
         }
       end
 
-      subject(:response) { described_class.new(body: body, targets: [ target, target2 ], model: model, dimensions: dimensions) }
+      subject(:response) { described_class.new(body: body, targets: [ target, target2 ], model: model) }
 
       it 'returns array of hashes for each target' do
         result = response.vector_cache_hashes

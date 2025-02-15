@@ -1,10 +1,5 @@
 json.object "list"
-
-json.data @embeddings do |data, index|
-  json.object "embedding"
-  json.embedding data
-  json.index index
-end
+json.data @embeddings
 
 json.model @model
 

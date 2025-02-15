@@ -121,6 +121,19 @@ RSpec.describe "V1::Embeddings", type: :request do
   end
 
   def build_stub_request(model:, input:, base64s:)
+    upstream_response = {
+      data: base64s.map.with_index do |base64, index|
+        {
+          embedding: base64,
+          index: index,
+          object: "embedding"
+        }
+      end,
+      model: model,
+      object: "list",
+      usage: { prompt_tokens: 8, total_tokens: 8 }
+    }.to_json
+
     stub_request(:post, "https://api.openai.com/v1/embeddings")
       .with(
         headers: {
@@ -136,18 +149,10 @@ RSpec.describe "V1::Embeddings", type: :request do
           encoding_format: "base64"
         }.to_json
       )
-      .to_return(status: 200, body: {
-        object: "list",
-        data: base64s.map.with_index { |base64, index| {
-          object: "embedding",
-          embedding: base64,
-          index: index
-        } },
-        model: model,
-        usage: {
-          prompt_tokens: 8,
-          total_tokens: 8
-        }
-      }.to_json)
+      .to_return(
+        status: 200,
+        headers: { "Content-Type" => "application/json" },
+        body: upstream_response
+      )
   end
 end

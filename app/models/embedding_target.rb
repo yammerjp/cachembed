@@ -19,7 +19,6 @@ class EmbeddingTarget
     elsif input.is_a?(Array) && input.all? { |v| v.is_a?(Array) && v.all? { |j| j.is_a?(Integer) } }
       input.map { |tokens| new(tokens) }
     else
-      binding.irb
       raise "Invalid input format: #{input}, allowed formats: String, Array of Integers, Array of Strings, Array of Arrays of Integers"
     end
   end

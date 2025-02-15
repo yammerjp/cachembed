@@ -26,12 +26,8 @@ class EmbeddingForm
   def save!
     raise ActiveRecord::RecordInvalid.new(self) unless valid?
 
-    embedding_by_sha1sum = {}
-
-    cached_vectors.each do |cached_vector|
-      embedding_by_sha1sum[cached_vector.input_hash] = cached_vector.formatted_content(encoding_format)
-    end
-
+    vector_by_sha1sum = cached_vectors.index_by(&:input_hash)
+    
     if upstream_targets.any?
       response = upstream_client.post
       upstream_vectors = VectorCache.import_from_response!(response)
@@ -40,27 +36,30 @@ class EmbeddingForm
       end
       @prompt_tokens = response.prompt_tokens
       @total_tokens = response.total_tokens
-
       upstream_vectors.each do |vector|
-        embedding_by_sha1sum[vector.input_hash] = vector.formatted_content(encoding_format)
+        vector_by_sha1sum[vector.input_hash] = vector
       end
     end
-
-    targets.map do |target|
-      embedding_by_sha1sum[target.sha1sum]
+    
+    targets.map.with_index do |target, index|
+      {
+        object: "embedding",
+        embedding: vector_by_sha1sum[target.sha1sum].formatted_content(encoding_format),
+        index: index
+      }
     end
   end
 
+  private
+
   def cached_vectors
-    VectorCache.where(input_hash: targets.map(&:sha1sum), model: model, dimensions: dimensions || default_dimensions).all
+    @cached_vectors ||= VectorCache.where(input_hash: targets.map(&:sha1sum), model: model, dimensions: dimensions || default_dimensions).all
   end
 
   def upstream_targets
     cached_sha1sums = cached_vectors.map(&:input_hash)
     targets.reject { |target| cached_sha1sums.include?(target.sha1sum) }
   end
-
-  private
 
   def upstream_client
     UpstreamClient.new(
