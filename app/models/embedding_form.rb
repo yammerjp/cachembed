@@ -6,7 +6,7 @@ class EmbeddingForm
   attr_reader :prompt_tokens, :total_tokens
 
   MODEL_NAMES = ENV.fetch("CACHEMBED_ALLOWED_MODELS", "text-embedding-ada-002,text-embedding-3-small,text-embedding-3-large").split(",")
-#  MODEL_NAMES = ENV.fetch("CACHEMBED_ALLOWED_MODELS", "unknown").split(",")
+  #  MODEL_NAMES = ENV.fetch("CACHEMBED_ALLOWED_MODELS", "unknown").split(",")
   ENCODING_FORMATS = %w[float base64].freeze
   DEFAULT_ENCODING_FORMAT = ENCODING_FORMATS.first
 

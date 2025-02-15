@@ -23,7 +23,7 @@ RSpec.describe "V1::Embeddings", type: :request do
           }, params: {
             embedding: {
               model: "text-embedding-ada-002",
-              input: "Hello, world!",
+              input: "Hello, world!"
             }
           }.to_json
 
@@ -31,10 +31,10 @@ RSpec.describe "V1::Embeddings", type: :request do
           expect(JSON.parse(response.body)).to eq({
             "object" => "list",
             "data" => [
-              {"object" => "embedding", "embedding" => [0.125, 0.25, 0.5], "index" => 0},
+              { "object" => "embedding", "embedding" => [ 0.125, 0.25, 0.5 ], "index" => 0 }
             ],
             "model" => "text-embedding-ada-002",
-            "usage" => {"prompt_tokens" => 8, "total_tokens" => 8},
+            "usage" => { "prompt_tokens" => 8, "total_tokens" => 8 }
           })
         end
       end
@@ -61,10 +61,10 @@ RSpec.describe "V1::Embeddings", type: :request do
           expect(JSON.parse(response.body)).to eq({
             "object" => "list",
             "data" => [
-              {"object" => "embedding", "embedding" => [12.078431129455566, 12.087722778320312, 11.26669979095459, 1.757643058875047e-10],"index" => 0},
+              { "object" => "embedding", "embedding" => [ 12.078431129455566, 12.087722778320312, 11.26669979095459, 1.757643058875047e-10 ], "index" => 0 }
             ],
             "model" => "text-embedding-ada-002",
-            "usage" => {"prompt_tokens" => 0, "total_tokens" => 0},
+            "usage" => { "prompt_tokens" => 0, "total_tokens" => 0 }
           })
         end
       end
@@ -95,17 +95,16 @@ RSpec.describe "V1::Embeddings", type: :request do
         expect(JSON.parse(response.body)).to eq({
           "object" => "list",
           "data" => [
-            {"embedding" => [0.125, 0.25, 0.5], "index" => 0, "object" => "embedding"},
-            {"embedding" => [0.375, 0.75, 0.875], "index" => 1, "object" => "embedding"},
+            { "embedding" => [ 0.125, 0.25, 0.5 ], "index" => 0, "object" => "embedding" },
+            { "embedding" => [ 0.375, 0.75, 0.875 ], "index" => 1, "object" => "embedding" }
           ],
           "model" => "text-embedding-ada-002",
-          "usage" => {"prompt_tokens" => 0, "total_tokens" => 0},
+          "usage" => { "prompt_tokens" => 0, "total_tokens" => 0 },
         "model" => "text-embedding-ada-002",
         "object" => "list",
-       -"usage" => {"prompt_tokens" => 0, "total_tokens" => 0},
-       +"usage" => {"prompt_tokens" => 8, "total_tokens" => 8},
+       -"usage" => { "prompt_tokens" => 0, "total_tokens" => 0 },
+       +"usage" => { "prompt_tokens" => 8, "total_tokens" => 8 }
         })
-
       end
     end
 
@@ -134,10 +133,10 @@ RSpec.describe "V1::Embeddings", type: :request do
         expect(JSON.parse(response.body)).to eq({
           "object" => "list",
           "data" => [
-            {"embedding" => [0.125, 0.25, 0.5], "index" => 0, "object" => "embedding"},
+            { "embedding" => [ 0.125, 0.25, 0.5 ], "index" => 0, "object" => "embedding" }
           ],
           "model" => "text-embedding-ada-002",
-          "usage" => {"prompt_tokens" => 8, "total_tokens" => 8},
+          "usage" => { "prompt_tokens" => 8, "total_tokens" => 8 }
         })
       end
     end
@@ -170,11 +169,11 @@ RSpec.describe "V1::Embeddings", type: :request do
         expect(JSON.parse(response.body)).to eq({
           "object" => "list",
           "data" => [
-            {"embedding" => [0.125, 0.25, 0.5], "index" => 0, "object" => "embedding"},
-            {"embedding" => [0.375, 0.75, 0.875], "index" => 1, "object" => "embedding"},
+            { "embedding" => [ 0.125, 0.25, 0.5 ], "index" => 0, "object" => "embedding" },
+            { "embedding" => [ 0.375, 0.75, 0.875 ], "index" => 1, "object" => "embedding" }
           ],
           "model" => "text-embedding-ada-002",
-          "usage" => {"prompt_tokens" => 8, "total_tokens" => 8},
+          "usage" => { "prompt_tokens" => 8, "total_tokens" => 8 }
         })
       end
     end
