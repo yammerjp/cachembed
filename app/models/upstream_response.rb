@@ -28,13 +28,13 @@ class UpstreamResponse
   def total_tokens
     @body[:usage][:total_tokens]
   end
-  
+
   def dimensions
     @dimensions ||= base64_decode(body[:data].first[:embedding]).unpack("f*").size
   end
-  
+
   private
-  
+
   def base64_decode(content)
     Base64.strict_decode64(content)
   end

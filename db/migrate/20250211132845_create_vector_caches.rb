@@ -7,7 +7,7 @@ class CreateVectorCaches < ActiveRecord::Migration[8.0]
       t.binary :content, null: false
 
       t.timestamps
-      t.index [:input_hash, :model, :dimensions], unique: true
+      t.index [ :input_hash, :model, :dimensions ], unique: true
     end
   end
 end

@@ -27,7 +27,7 @@ class EmbeddingForm
     raise ActiveRecord::RecordInvalid.new(self) unless valid?
 
     vector_by_sha1sum = cached_vectors.index_by(&:input_hash)
-    
+
     if upstream_targets.any?
       response = upstream_client.post
       upstream_vectors = VectorCache.import_from_response!(response)
@@ -40,7 +40,7 @@ class EmbeddingForm
         vector_by_sha1sum[vector.input_hash] = vector
       end
     end
-    
+
     targets.map.with_index do |target, index|
       {
         object: "embedding",

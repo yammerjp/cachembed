@@ -13,11 +13,11 @@ class VectorCache < ApplicationRecord
       self.create!(hash)
     end
   end
-  
+
   def base64_content
     Base64.strict_encode64(content)
   end
-  
+
   def float_array_content
     content.unpack("f*")
   end

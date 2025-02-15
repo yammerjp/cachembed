@@ -1,7 +1,7 @@
 source "https://rubygems.org"
 
 gem "activerecord-import"
-gem 'faraday'
+gem "faraday"
 # Bundle edge Rails instead: gem "rails", github: "rails/rails", branch: "main"
 gem "rails", "~> 8.0.1"
 # Use sqlite3 as the database for Active Record
@@ -44,13 +44,13 @@ end
 group :development do
   # Use console on exceptions pages [https://github.com/rails/web-console]
   gem "web-console"
-  gem 'rspec-rails'
-  gem 'webmock'
+  gem "rspec-rails"
+  gem "webmock"
 end
 
 group :test do
   # Use system testing [https://guides.rubyonrails.org/testing.html#system-testing]
   gem "capybara"
   gem "selenium-webdriver"
-  gem 'webmock'
+  gem "webmock"
 end

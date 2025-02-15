@@ -4,7 +4,7 @@ RSpec.describe UpstreamClient do
   let(:api_key) { "test_api_key" }
   let(:model) { "text-embedding-3-small" }
   let(:dimensions) { 1536 }
-  let(:targets) { [double("Target", to_hash: { text: "Hello world" })] }
+  let(:targets) { [ double("Target", to_hash: { text: "Hello world" }) ] }
   let(:client) { described_class.new(api_key: api_key, model: model, dimensions: dimensions, targets: targets) }
 
   describe '#initialize' do
@@ -20,7 +20,7 @@ RSpec.describe UpstreamClient do
     it '正しいリクエストボディを生成すること' do
       expected_body = {
         model: model,
-        input: [{ text: "Hello world" }],
+        input: [ { text: "Hello world" } ],
         encoding_format: "base64",
         dimensions: dimensions
       }
@@ -33,7 +33,7 @@ RSpec.describe UpstreamClient do
       it 'dimensionsを含まないリクエストボディを生成すること' do
         expected_body = {
           model: model,
-          input: [{ text: "Hello world" }],
+          input: [ { text: "Hello world" } ],
           encoding_format: "base64"
         }
         expect(client.request_body).to eq(expected_body)
@@ -42,7 +42,7 @@ RSpec.describe UpstreamClient do
   end
 
   describe '#post' do
-    let(:float_array) { [0.1, 0.2, 0.3] }
+    let(:float_array) { [ 0.1, 0.2, 0.3 ] }
     let(:mock_response) do
       {
         data: [
@@ -98,4 +98,4 @@ RSpec.describe UpstreamClient do
       end
     end
   end
-end 
+end
