@@ -14,7 +14,7 @@ class EmbeddingForm
   validates :dimensions, numericality: { only_integer: true, greater_than: 1, less_than: 10_000 }, allow_nil: true
   validates :encoding_format, inclusion: { in: ENCODING_FORMATS }, allow_nil: true
 
-  API_KEY_PATTERN = ENV.fetch("CACHEMBED_API_KEY_PATTERN", "^sk-[a-zA-Z0-9]+$")
+  API_KEY_PATTERN = ENV.fetch("CACHEMBED_API_KEY_PATTERN", "^sk-[a-zA-Z0-9_-]+$")
 
   validates :api_key, presence: true, format: { with: /\A#{API_KEY_PATTERN}\z/ }
   validates :targets, presence: true

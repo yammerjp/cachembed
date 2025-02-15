@@ -51,7 +51,7 @@ Configure the application using these environment variables:
 |---------------------|-------------|----------|
 | CACHEMBED_UPSTREAM_URL | OpenAI embedding API endpoint | https://api.openai.com/v1/embeddings |
 | CACHEMBED_ALLOWED_MODELS | Comma-separated list of allowed models | text-embedding-3-small,text-embedding-3-large,text-embedding-ada-002 |
-| CACHEMBED_API_KEY_PATTERN | Regular expression pattern for API key validation | ^sk-[a-zA-Z0-9]+$ |
+| CACHEMBED_API_KEY_PATTERN | Regular expression pattern for API key validation | ^sk-[a-zA-Z0-9_-]+$ |
 | DATABASE_URL | Database connection string | Depends on config/database.yml |
 
 ## Usage
