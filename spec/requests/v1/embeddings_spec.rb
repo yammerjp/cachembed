@@ -18,16 +18,25 @@ RSpec.describe "V1::Embeddings", type: :request do
         it "returns a 200 status code" do
           post v1_embeddings_path, headers: {
             "Authorization" => "Bearer sk-abc123",
-            "Content-Type" => "application/json"
+            "Content-Type" => "application/json",
+            "Accept" => "application/json"
           }, params: {
             embedding: {
               model: "text-embedding-ada-002",
-              input: "Hello, world!"
+              input: "Hello, world!",
             }
           }.to_json
+
+          expect(response).to be_successful
+          expect(JSON.parse(response.body)).to eq({
+            "object" => "list",
+            "data" => [
+              {"object" => "embedding", "embedding" => [0.125, 0.25, 0.5], "index" => 0},
+            ],
+            "model" => "text-embedding-ada-002",
+            "usage" => {"prompt_tokens" => 8, "total_tokens" => 8},
+          })
         end
-        # TODO: validate response structure
-        # expect(response).to be_successful
       end
 
       context 'with cache' do
@@ -39,13 +48,24 @@ RSpec.describe "V1::Embeddings", type: :request do
         it "returns a 200 status code" do
           post v1_embeddings_path, headers: {
             "Authorization" => "Bearer sk-abc123",
-            "Content-Type" => "application/json"
+            "Content-Type" => "application/json",
+            "Accept" => "application/json"
           }, params: {
             embedding: {
               model: "text-embedding-ada-002",
               input: "Hello, world!"
             }
           }.to_json
+
+          expect(response).to be_successful
+          expect(JSON.parse(response.body)).to eq({
+            "object" => "list",
+            "data" => [
+              {"object" => "embedding", "embedding" => [12.078431129455566, 12.087722778320312, 11.26669979095459, 1.757643058875047e-10],"index" => 0},
+            ],
+            "model" => "text-embedding-ada-002",
+            "usage" => {"prompt_tokens" => 0, "total_tokens" => 0},
+          })
         end
       end
     end
@@ -62,13 +82,30 @@ RSpec.describe "V1::Embeddings", type: :request do
       it "returns a 200 status code" do
         post v1_embeddings_path, headers: {
           "Authorization" => "Bearer sk-abc123",
-          "Content-Type" => "application/json"
+          "Content-Type" => "application/json",
+          "Accept" => "application/json"
         }, params: {
           embedding: {
             model: "text-embedding-ada-002",
             input: [ "Hello, world!", "Goodbye, world!" ]
           }
         }.to_json
+
+        expect(response).to be_successful
+        expect(JSON.parse(response.body)).to eq({
+          "object" => "list",
+          "data" => [
+            {"embedding" => [0.125, 0.25, 0.5], "index" => 0, "object" => "embedding"},
+            {"embedding" => [0.375, 0.75, 0.875], "index" => 1, "object" => "embedding"},
+          ],
+          "model" => "text-embedding-ada-002",
+          "usage" => {"prompt_tokens" => 0, "total_tokens" => 0},
+        "model" => "text-embedding-ada-002",
+        "object" => "list",
+       -"usage" => {"prompt_tokens" => 0, "total_tokens" => 0},
+       +"usage" => {"prompt_tokens" => 8, "total_tokens" => 8},
+        })
+
       end
     end
 
@@ -84,13 +121,24 @@ RSpec.describe "V1::Embeddings", type: :request do
       it "returns a 200 status code" do
         post v1_embeddings_path, headers: {
           "Authorization" => "Bearer sk-abc123",
-          "Content-Type" => "application/json"
+          "Content-Type" => "application/json",
+          "Accept" => "application/json"
         }, params: {
           embedding: {
             model: "text-embedding-ada-002",
             input: [ 1, 2, 3 ]
           }
         }.to_json
+
+        expect(response).to be_successful
+        expect(JSON.parse(response.body)).to eq({
+          "object" => "list",
+          "data" => [
+            {"embedding" => [0.125, 0.25, 0.5], "index" => 0, "object" => "embedding"},
+          ],
+          "model" => "text-embedding-ada-002",
+          "usage" => {"prompt_tokens" => 8, "total_tokens" => 8},
+        })
       end
     end
 
@@ -106,7 +154,8 @@ RSpec.describe "V1::Embeddings", type: :request do
       it "returns a 200 status code" do
         post v1_embeddings_path, headers: {
           "Authorization" => "Bearer sk-abc123",
-          "Content-Type" => "application/json"
+          "Content-Type" => "application/json",
+          "Accept" => "application/json"
         }, params: {
           embedding: {
             model: "text-embedding-ada-002",
@@ -116,6 +165,17 @@ RSpec.describe "V1::Embeddings", type: :request do
             ]
           }
         }.to_json
+
+        expect(response).to be_successful
+        expect(JSON.parse(response.body)).to eq({
+          "object" => "list",
+          "data" => [
+            {"embedding" => [0.125, 0.25, 0.5], "index" => 0, "object" => "embedding"},
+            {"embedding" => [0.375, 0.75, 0.875], "index" => 1, "object" => "embedding"},
+          ],
+          "model" => "text-embedding-ada-002",
+          "usage" => {"prompt_tokens" => 8, "total_tokens" => 8},
+        })
       end
     end
   end

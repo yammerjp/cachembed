@@ -5,7 +5,8 @@ class EmbeddingForm
   attr_accessor :model, :dimensions, :encoding_format, :api_key, :targets, :input
   attr_reader :prompt_tokens, :total_tokens
 
-  MODEL_NAMES = ENV.fetch("CACHEMBED_ALLOWED_MODELS", "text-embedding-ada-002 text-embedding-3-small text-embedding-3-large").split(",").freeze
+  MODEL_NAMES = ENV.fetch("CACHEMBED_ALLOWED_MODELS", "text-embedding-ada-002,text-embedding-3-small,text-embedding-3-large").split(",")
+#  MODEL_NAMES = ENV.fetch("CACHEMBED_ALLOWED_MODELS", "unknown").split(",")
   ENCODING_FORMATS = %w[float base64].freeze
   DEFAULT_ENCODING_FORMAT = ENCODING_FORMATS.first
 
@@ -13,7 +14,7 @@ class EmbeddingForm
   validates :dimensions, numericality: { only_integer: true, greater_than: 1, less_than: 10_000 }, allow_nil: true
   validates :encoding_format, inclusion: { in: ENCODING_FORMATS }, allow_nil: true
 
-  API_KEY_PATTERN = ENV.fetch("CACHEMBED_API_KEY_PATTERN", "^sk-[a-zA-Z0-9]+$").freeze
+  API_KEY_PATTERN = ENV.fetch("CACHEMBED_API_KEY_PATTERN", "^sk-[a-zA-Z0-9]+$")
 
   validates :api_key, presence: true, format: { with: /\A#{API_KEY_PATTERN}\z/ }
   validates :targets, presence: true
