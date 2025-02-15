@@ -25,6 +25,6 @@ jobs:
             --tag ghcr.io/$GITHUB_ACTOR/cachembed:$(echo $GITHUB_SHA | head -c7) \
             .
       - name: Push Docker Image
-        run:
+        run: |
           docker push ghcr.io/$GITHUB_ACTOR/cachembed:latest
           docker push ghcr.io/$GITHUB_ACTOR/cachembed:$(echo $GITHUB_SHA | head -c7)
