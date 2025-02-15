@@ -1,30 +1,105 @@
-# README
+# Cachembed
 
-This README would normally document whatever steps are necessary to get the
-application up and running.
+A lightweight caching proxy for OpenAI embedding API requests (Rails implementation)
 
-Things you may want to cover:
+## Overview
 
-* Ruby version
+Cachembed is a proxy server that caches OpenAI embedding API results to reduce redundant requests and minimize costs. It supports SQLite (default) and PostgreSQL as storage backends, allows model restrictions, and provides garbage collection (GC) for cache management.
 
-* System dependencies
+## Features
 
-* Configuration
+- Caches embedding results to SQLite or PostgreSQL
+- Proxies requests to OpenAI API (https://api.openai.com/v1/embeddings by default)
+- Supports API key validation via regex pattern
+- Restricts usage to allowed embedding models
+- Provides garbage collection (GC) for cache cleanup
+- Supports database migrations
+- Configurable via environment variables
 
-* Database creation
+## Requirements
 
-* Database initialization
+* Ruby 3.4.1 or higher
+* Rails 8.0.1 or higher
+* SQLite3 or PostgreSQL
 
-* How to run the test suite
+## Installation
 
-* Services (job queues, cache servers, search engines, etc.)
+Clone the repository and install dependencies:
 
-* Deployment instructions
+    git clone https://github.com/your-username/cachembed-rails
+    cd cachembed-rails
+    bundle install
 
-* ...
+## Setup
+
+1. Create and migrate the database:
+
+    bin/setup --skip=server
+
+2. Set up environment variables:
+
+    cp .env.example .env
+    # Edit .env file with your configuration
+
+## Configuration
+
+Configure the application using these environment variables:
+
+| Environment Variable | Description | Default |
+|---------------------|-------------|----------|
+| CACHEMBED_UPSTREAM_URL | OpenAI embedding API endpoint | https://api.openai.com/v1/embeddings |
+| CACHEMBED_ALLOWED_MODELS | Comma-separated list of allowed models | text-embedding-3-small,text-embedding-3-large,text-embedding-ada-002 |
+| CACHEMBED_API_KEY_PATTERN | Regular expression pattern for API key validation | ^sk-[a-zA-Z0-9]+$ |
+| DATABASE_URL | Database connection string | Depends on config/database.yml |
+
+## Usage
+
+### Starting the Server
+
+Development environment:
+
+    rails server
+
+Production environment:
+
+    RAILS_ENV=production rails server
+
+### Running Garbage Collection (GC)
+
+Use the rake task to delete old cache entries:
+
+    rails cache:gc[7.days]  # Deletes entries older than 7 days
+
+### API Endpoints
+
+The server provides the following endpoint:
+
+- POST `/embeddings`: Proxies requests to OpenAI's embedding API with caching
+
+Example request:
+
+    curl -X POST http://localhost:3000/embeddings \
+      -H "Content-Type: application/json" \
+      -H "Authorization: Bearer sk-your-api-key" \
+      -d '{
+        "input": "Your text here",
+        "model": "text-embedding-3-small"
+      }'
+
+## Docker
+
+Run using Docker Compose:
+
+    docker compose up -d
+
+## License
+
+MIT License
+
+## Contributing
+
+Pull requests are welcome! If you find a bug or want to request a feature, please open an issue.
 
 ## TODO
 
-- save default dimensions for each model
-  - bundle exec rails generate model name:string default_demensions:integer
 - LRU cache (with request logs)
