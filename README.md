@@ -28,6 +28,9 @@ Clone the repository and install dependencies:
 
     git clone https://github.com/your-username/cachembed-rails
     cd cachembed-rails
+    # if you want to use PostgreSQL, run:
+    bundle install --with=postgresql
+    # if you want to use SQLite, run:
     bundle install
 
 ## Setup

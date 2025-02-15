@@ -101,6 +101,10 @@ GEM
       bigdecimal
       rexml
     crass (1.0.6)
+    database_cleaner-active_record (2.2.0)
+      activerecord (>= 5.a)
+      database_cleaner-core (~> 2.0.0)
+    database_cleaner-core (2.0.1)
     date (3.4.1)
     debug (1.10.0)
       irb (~> 1.10)
@@ -180,6 +184,7 @@ GEM
     parser (3.3.7.1)
       ast (~> 2.4.1)
       racc
+    pg (1.5.9)
     pp (0.6.2)
       prettyprint
     prettyprint (0.2.0)
@@ -359,9 +364,11 @@ DEPENDENCIES
   bootsnap
   brakeman
   capybara
+  database_cleaner-active_record
   debug
   faraday
   jbuilder
+  pg
   puma (>= 5.0)
   rails (~> 8.0.1)
   rspec-rails
