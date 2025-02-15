@@ -40,12 +40,11 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    matrix:
-      strategy:
-        matrix:
-          database:
-            - "sqlite3:storage/test.sqlite3"
-            - "postgresql://postgres:postgres@localhost:5432/postgres"
+    strategy:
+      matrix:
+        database:
+          - "sqlite3:storage/test.sqlite3"
+          - "postgresql://postgres:postgres@localhost:5432/postgres"
     services:
       postgres:
         image: postgres:17
