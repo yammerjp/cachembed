@@ -1,0 +1,2 @@
+class EmbeddingModel < ApplicationRecord
+end

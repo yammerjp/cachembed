@@ -35,6 +35,9 @@ class EmbeddingForm
     if upstream_targets.any?
       response = upstream_client.post
       upstream_vectors = VectorCache.import_from_response!(response)
+      if dimensions.nil? && default_dimensions.nil?
+        save_default_dimensions!(upstream_vectors.first.dimensions)
+      end
       @prompt_tokens = response.prompt_tokens
       @total_tokens = response.total_tokens
 
@@ -49,7 +52,7 @@ class EmbeddingForm
   end
 
   def cached_vectors
-    VectorCache.where(input_hash: targets.map(&:sha1sum), model: model, dimensions: dimensions || 0).all
+    VectorCache.where(input_hash: targets.map(&:sha1sum), model: model, dimensions: dimensions || default_dimensions).all
   end
 
   def upstream_targets
@@ -63,8 +66,16 @@ class EmbeddingForm
     UpstreamClient.new(
       api_key: api_key,
       model: model,
-      dimensions: dimensions,
+      dimensions: dimensions || default_dimensions,
       targets: upstream_targets,
     )
+  end
+
+  def default_dimensions
+    @default_dimensions ||= EmbeddingModel.find_by(name: model)&.default_dimensions
+  end
+
+  def save_default_dimensions!(d)
+    EmbeddingModel.create!(name: model, default_dimensions: d)
   end
 end

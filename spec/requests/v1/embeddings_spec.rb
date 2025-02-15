@@ -32,7 +32,8 @@ RSpec.describe "V1::Embeddings", type: :request do
 
       context 'with cache' do
         before do
-          VectorCache.create!(input_hash: "943a702d06f34599aee1f8da8ef9f7296031d699", content: "AAAAPgAAgD4AAAA/", model: "text-embedding-ada-002", dimensions: 0)
+          EmbeddingModel.create!(name: "text-embedding-ada-002", default_dimensions: 1536)
+          VectorCache.create!(input_hash: "943a702d06f34599aee1f8da8ef9f7296031d699", content: "AAAAPgAAgD4AAAA/", model: "text-embedding-ada-002", dimensions: 1536)
         end
 
         it "returns a 200 status code" do

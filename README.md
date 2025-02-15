@@ -26,4 +26,5 @@ Things you may want to cover:
 ## TODO
 
 - save default dimensions for each model
+  - bundle exec rails generate model name:string default_demensions:integer
 - LRU cache (with request logs)
