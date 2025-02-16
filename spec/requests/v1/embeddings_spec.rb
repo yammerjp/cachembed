@@ -99,7 +99,7 @@ RSpec.describe "V1::Embeddings", type: :request do
             { "embedding" => [ 0.375, 0.75, 0.875 ], "index" => 1, "object" => "embedding" }
           ],
           "model" => "text-embedding-ada-002",
-          "usage" => { "prompt_tokens" => 8, "total_tokens" => 8 },
+          "usage" => { "prompt_tokens" => 8, "total_tokens" => 8 }
         })
       end
     end

@@ -5,7 +5,7 @@ RSpec.describe EmbeddingForm do
     {
       model: "text-embedding-ada-002",
       api_key: "sk-validapikey123",
-      input: ["テストテキスト"]
+      input: [ "テストテキスト" ]
     }
   end
 
@@ -83,7 +83,7 @@ RSpec.describe EmbeddingForm do
         .with(
           body: {
             model: "text-embedding-ada-002",
-            input: ["テストテキスト"],
+            input: [ "テストテキスト" ],
             encoding_format: "base64"
           }.to_json,
           headers: {
@@ -115,18 +115,18 @@ RSpec.describe EmbeddingForm do
     it '有効な属性で実行した場合、埋め込みベクトルの配列を返すこと' do
       form = EmbeddingForm.new(valid_attributes)
       result = form.save!
-      
+
       expect(result).to be_an(Array)
       expect(result.first).to include(
         object: "embedding",
         index: 0,
-        embedding: [0.125, 0.25, 0.5]
+        embedding: [ 0.125, 0.25, 0.5 ]
       )
     end
-    
+
     it 'EmbeddingRequestが1つ作成されること' do
       form = EmbeddingForm.new(valid_attributes)
-      expect{form.save!}.to change(EmbeddingRequest, :count).by(1)
+      expect { form.save! }.to change(EmbeddingRequest, :count).by(1)
     end
 
     it 'EmbeddingRequestのinput_hashがハッシュ化されていること' do
@@ -134,7 +134,7 @@ RSpec.describe EmbeddingForm do
       form.save!
       expect(EmbeddingRequest.first.input_hash).to eq(Digest::SHA1.hexdigest("テストテキスト"))
     end
-    
+
     it 'EmbeddingRequestのinput_lengthが正しいこと' do
       form = EmbeddingForm.new(valid_attributes)
       form.save!
