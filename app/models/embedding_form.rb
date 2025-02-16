@@ -71,7 +71,7 @@ class EmbeddingForm
     UpstreamClient.new(
       api_key: api_key,
       model: model,
-      dimensions: dimensions || default_dimensions,
+      dimensions: dimensions,
       targets: upstream_targets,
     )
   end
