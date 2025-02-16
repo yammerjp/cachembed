@@ -1,10 +1,10 @@
 # Cachembed
 
-A lightweight caching proxy for OpenAI embedding API requests (Rails implementation)
+A lightweight caching proxy for OpenAI embedding API requests.
 
 ## Overview
 
-Cachembed is a proxy server that caches OpenAI embedding API results to reduce redundant requests and minimize costs. It supports SQLite (default) and PostgreSQL as storage backends, allows model restrictions, and provides garbage collection (GC) for cache management.
+Cachembed is a proxy server that caches OpenAI embedding API results to reduce redundant requests and minimize costs. It supports SQLite (default) and PostgreSQL as storage backends.
 
 ## Features
 
@@ -34,14 +34,9 @@ Clone the repository and install dependencies:
 
 ## Setup
 
-1. Create and migrate the database:
+Create and migrate the database:
 
     bin/setup --skip=server
-
-2. Set up environment variables:
-
-    cp .env.example .env
-    # Edit .env file with your configuration
 
 ## Configuration
 
@@ -70,23 +65,17 @@ Production environment:
 
 The server provides the following endpoint:
 
-- POST `/embeddings`: Proxies requests to OpenAI's embedding API with caching
+- POST `/v1/embeddings`: Proxies requests to OpenAI's embedding API with caching
 
 Example request:
 
-    curl -X POST http://localhost:3000/embeddings \
+    curl -X POST http://localhost:3000/v1/embeddings \
       -H "Content-Type: application/json" \
       -H "Authorization: Bearer sk-your-api-key" \
       -d '{
         "input": "Your text here",
         "model": "text-embedding-3-small"
       }'
-
-## Docker
-
-Run using Docker Compose:
-
-    docker compose up -d
 
 ## License
 
@@ -98,5 +87,4 @@ Pull requests are welcome! If you find a bug or want to request a feature, pleas
 
 ## TODO
 
-- LRU cache (with request logs)
-- Garbage collection for old cache entries
+- LRU cache (with request logs) and garbage collection for old cache entries
