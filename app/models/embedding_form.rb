@@ -30,6 +30,8 @@ class EmbeddingForm
   def save!
     raise ActiveRecord::RecordInvalid.new(self) unless valid?
 
+    save_embedding_requests!
+
     vector_by_sha1sum = cached_vectors.index_by(&:input_hash)
 
     if upstream_targets.any?
@@ -80,5 +82,18 @@ class EmbeddingForm
 
   def save_default_dimensions!(d)
     EmbeddingModel.create!(name: model, default_dimensions: d)
+  end
+
+  def save_embedding_requests!
+    EmbeddingRequest.insert_all!(
+      targets.map do |target|
+        {
+          input_hash: target.sha1sum,
+          input_length: target.input_length,
+          model: model,
+          dimensions: dimensions
+        }
+      end
+    )
   end
 end

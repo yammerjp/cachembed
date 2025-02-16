@@ -1,0 +1,2 @@
+class EmbeddingRequest < ApplicationRecord
+end

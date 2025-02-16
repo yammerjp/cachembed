@@ -26,6 +26,14 @@ class EmbeddingTarget
   def sha1sum
     @sha1sum ||= Digest::SHA1.hexdigest(sha1sum_source)
   end
+  
+  def input_length
+    if is_string?
+      @value.bytesize
+    else
+      @value.size
+    end
+  end
 
   private
 
