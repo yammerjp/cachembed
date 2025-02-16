@@ -2,6 +2,8 @@ on:
   push:
     branches:
       - main
+    tags:
+      - '*'
 
 name: Docker Build and Push
 
@@ -11,8 +13,18 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      image_tag: ${{ steps.set_tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v3
+      - name: Set Docker tag
+        id: set_tag
+        run: |
+          if [[ $GITHUB_REF == refs/tags/* ]]; then
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=$(echo $GITHUB_SHA | head -c7)" >> $GITHUB_OUTPUT
+          fi
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v2
         with:
@@ -22,9 +34,9 @@ jobs:
       - name: Build Docker Image
         run: |
           docker build --tag ghcr.io/$GITHUB_ACTOR/cachembed:latest \
-            --tag ghcr.io/$GITHUB_ACTOR/cachembed:$(echo $GITHUB_SHA | head -c7) \
+            --tag ghcr.io/$GITHUB_ACTOR/cachembed:${{ steps.set_tag.outputs.tag }} \
             .
       - name: Push Docker Image
         run: |
           docker push ghcr.io/$GITHUB_ACTOR/cachembed:latest
-          docker push ghcr.io/$GITHUB_ACTOR/cachembed:$(echo $GITHUB_SHA | head -c7)
+          docker push ghcr.io/$GITHUB_ACTOR/cachembed:${{ steps.set_tag.outputs.tag }}
