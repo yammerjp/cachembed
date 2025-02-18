@@ -45,6 +45,7 @@ jobs:
         database:
           - "sqlite3:storage/test.sqlite3"
           - "postgresql://postgres:postgres@localhost:5432/cachembed_test"
+          - "mysql://root:password@127.0.0.1:3306/myapp_test"
     services:
       postgres:
         image: postgres:17
@@ -55,6 +56,14 @@ jobs:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: cachembed_test
         options: --health-cmd "pg_isready -U postgres -d cachembed_test" --health-interval 10s --health-timeout 5s --health-retries 5
+      mysql:
+        image: mysql:8.0
+        ports:
+          - 3306:3306
+        env:
+          MYSQL_ROOT_PASSWORD: password
+          MYSQL_DATABASE: myapp_test
+        options: --health-cmd "mysqladmin ping -h 127.0.0.1" --health-interval 10s --health-timeout 5s --health-retries 5
 
     steps:
       - name: Install packages
@@ -74,6 +83,6 @@ jobs:
           RAILS_ENV: test
           DATABASE_URL: ${{ matrix.database }}
         run: |
-          bundle install --with=postgresql
+          bundle install --with=postgresql,mysql
           bin/rails db:schema:load
           bin/bundle exec rspec
